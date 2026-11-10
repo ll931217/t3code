@@ -1938,12 +1938,14 @@ it.effect("a local task runs in this thread's project", () =>
       const a = yield* makeLaptop(database, offers);
       yield* seedParent(a);
 
-      const result = yield* a.call("delegate_task", {
-        task: "Run it here.",
-        target: { projectId: "project:elsewhere" },
-      });
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toContain("invalid_request");
+      for (const input of [
+        { task: "Run it here.", target: { projectId: "project:elsewhere" } },
+        { task: "Stay inside assigned files.", writablePaths: ["src/assigned"] },
+      ]) {
+        const result = yield* a.call("delegate_task", input);
+        expect(result.isError).toBe(true);
+        expect(JSON.stringify(result.content)).toContain("invalid_request");
+      }
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

@@ -1,5 +1,6 @@
 import {
   CommandId,
+  AGENT_DELEGATION_PEER_TOOLS,
   type EnvironmentId,
   NodeId,
   OrchestratorMcpFailure,
@@ -15,8 +16,15 @@ import {
   type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
+import { derive } from "@t3tools/provider-core/server/IdAllocator";
+import { stableStringify } from "@t3tools/shared/relaySigning";
+import * as Authority from "../agents/AgentDelegationAuthority.ts";
+import * as Profiles from "../agents/AgentProfiles.ts";
+import * as PeerMcpClient from "./PeerMcpClient.ts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Digest from "effect/crypto/Digest";
+import * as Hex from "effect/encoding/Hex";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -118,6 +126,10 @@ const isFinal = (error: OrchestratorMcpFailure) =>
 const make = Effect.gen(function* () {
   const followRetry = yield* FollowRetrySchedule;
   const forwarding = yield* PeerForwarding.PeerForwarding;
+  const digest = yield* Effect.serviceOption(Digest.Digest);
+  const authority = yield* Effect.serviceOption(Authority.AgentDelegationAuthority);
+  const profiles = yield* Effect.serviceOption(Profiles.AgentProfiles);
+  const peerClient = yield* Effect.serviceOption(PeerMcpClient.PeerMcpClient);
   const links = yield* PeerLinks.PeerLinks;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -261,33 +273,101 @@ const make = Effect.gen(function* () {
       const key = input.clientRequestId ?? (yield* random.uuidV4());
       const task = taskPrompt(input);
       const title = input.title ?? parent.thread.title;
-      const launched = yield* forwarding.call(
-        scope,
-        ProjectToolkit.tools.t3_thread_launch,
-        target.environmentId,
-        {
-          projectId,
-          title,
-          modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
-          ...(runtimeMode === undefined ? {} : { runtimeMode }),
-          ...(interactionMode === undefined ? {} : { interactionMode }),
-          message: task,
-          clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
-          // The thread there shows it is this thread's subagent, with a way back.
-          delegatedFrom: {
-            environmentId: hereId,
-            threadId: parent.thread.id,
-            title: parent.thread.title,
-          },
-        },
+      const commandId = CommandId.make(
+        `command:mcp:${encodeURIComponent(scope.requestNamespace)}:remote-delegate:${encodeURIComponent(key)}`,
       );
+      const pinned = Option.isSome(profiles)
+        ? yield* profiles.value.getThreadSnapshot(scope.thread.threadId).pipe(
+            Effect.mapError(
+              () =>
+                new OrchestratorMcpFailure({
+                  code: "orchestration_error",
+                  message: "Profile state unavailable.",
+                }),
+            ),
+          )
+        : null;
+      const managedLaunch = Effect.gen(function* () {
+        if (
+          pinned === null ||
+          input.profileId === undefined ||
+          Option.isNone(authority) ||
+          Option.isNone(peerClient) ||
+          Option.isNone(digest)
+        )
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message:
+              "Remote profile delegation requires a pinned parent and a reviewed destination profile.",
+          });
+        const snapshot = yield* authority.value.reviewThere(target.environmentId, {
+          projectId,
+          profileId: input.profileId,
+          ...(input.writablePaths === undefined ? {} : { writablePaths: input.writablePaths }),
+        });
+        const grant = yield* authority.value.reserve({
+          parent: { environmentId: hereId, threadId: scope.thread.threadId },
+          child: {
+            environmentId: target.environmentId,
+            threadId: derive.delegatedTaskThread({ commandId }),
+          },
+          projectId,
+          snapshot,
+          commandId,
+          requestKey: Hex.encode(
+            yield* digest.value
+              .digest(
+                Digest.sha256,
+                new TextEncoder().encode(
+                  stableStringify({ task, title, projectId, profileId: input.profileId }),
+                ),
+              )
+              .pipe(
+                Effect.mapError(
+                  () =>
+                    new OrchestratorMcpFailure({
+                      code: "orchestration_error",
+                      message: "Delegation identity unavailable.",
+                    }),
+                ),
+              ),
+          ),
+        });
+        return yield* peerClient.value.call({
+          environmentId: target.environmentId,
+          tool: AGENT_DELEGATION_PEER_TOOLS.launch,
+          arguments: { grant, projectId, task, title, commandId },
+          limits: {
+            runtimeMode: runtimeMode ?? parent.thread.runtimeMode,
+            interactionMode: interactionMode ?? parent.thread.interactionMode,
+          },
+          success: ProjectToolkit.tools.t3_thread_launch.successSchema,
+        });
+      });
+      const launched = yield* pinned !== null ||
+      input.profileId !== undefined ||
+      input.writablePaths !== undefined
+        ? managedLaunch
+        : forwarding.call(scope, ProjectToolkit.tools.t3_thread_launch, target.environmentId, {
+            projectId,
+            title,
+            modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
+            ...(runtimeMode === undefined ? {} : { runtimeMode }),
+            ...(interactionMode === undefined ? {} : { interactionMode }),
+            message: task,
+            clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
+            // The thread there shows it is this thread's subagent, with a way back.
+            delegatedFrom: {
+              environmentId: hereId,
+              threadId: parent.thread.id,
+              title: parent.thread.title,
+            },
+          });
       const link = yield* links.get(target.environmentId).pipe(
         Effect.map(Option.getOrUndefined),
         Effect.orElseSucceed(() => undefined),
       );
-      const commandId = CommandId.make(
-        `command:mcp:${encodeURIComponent(scope.requestNamespace)}:remote-delegate:${encodeURIComponent(key)}`,
-      );
+
       const remoteChild: OrchestrationV2RemoteTaskChild = {
         environmentId: target.environmentId,
         threadId: launched.threadId,
