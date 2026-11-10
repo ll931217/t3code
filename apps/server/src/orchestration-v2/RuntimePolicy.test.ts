@@ -1,9 +1,12 @@
 import { assert, it } from "@effect/vitest";
 import {
+  AgentProfile,
+  AgentProfileError,
   type ManagedPolicySummary,
   type ModelSelection,
   type OrchestrationV2AppThread,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   type RuntimeMode,
   type ServerProvider,
@@ -12,6 +15,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
@@ -20,6 +24,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as AgentProfiles from "../agents/AgentProfiles.ts";
 
 const projectId = ProjectId.make("project:runtime-policy");
 const providerInstanceId = ProviderInstanceId.make("codex");
@@ -114,6 +119,73 @@ const layerWithPolicy = (policy?: ManagedPolicySummary) =>
   );
 
 const layerTest = layerWithPolicy();
+const decodeProfile = Schema.decodeEffect(AgentProfile);
+
+it.effect("pins model and permissions and refuses revoked profiles on every resolve", () =>
+  Effect.gen(function* () {
+    const profile = yield* decodeProfile({
+      id: "personal/reviewer",
+      name: "Reviewer",
+      description: "",
+      prompt: "Review work.",
+      modelSelection,
+      permissions: {
+        filesystem: "read-only",
+        commands: false,
+        network: false,
+        writablePaths: [],
+        nativeTools: "capability-defaults",
+        mcpTools: [],
+        approvalPolicy: "never",
+        integrations: { commit: false, merge: false, publish: false },
+      },
+      delegation: { profiles: [], maxConcurrent: 4, maxAgents: 16, maxDepth: 3 },
+      isolation: "worktree",
+    });
+    let revoked = false;
+    const enforcing = RuntimePolicy.layerEnforcingProfiles.pipe(
+      Layer.provide(RuntimePolicy.layer),
+      Layer.provide(
+        Layer.mock(AgentProfiles.AgentProfiles)({
+          getThreadSnapshot: () =>
+            Effect.succeed({
+              id: "snapshot",
+              root: { profile, fingerprint: "version", sourceProjectId: null },
+              dependencies: [],
+            }),
+          assertSnapshotAllowed: () =>
+            revoked ? Effect.fail(new AgentProfileError({ reason: "revoked" })) : Effect.void,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+          getInstance: () =>
+            Effect.succeed({
+              ...providerInstanceFor(providerInstanceId),
+              driverKind: ProviderDriverKind.make("codex"),
+            }),
+        }),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = makeThread({ now, worktreePath: "/work" });
+      const resolved = yield* policy.resolve({ thread, modelSelection });
+      assert.equal(resolved.agentProfile?.id, profile.id);
+      assert.deepEqual(resolved.sandboxPolicy, { type: "readOnly", networkAccess: false });
+      assert.equal(resolved.approvalPolicy, "never");
+      const changed = yield* Effect.flip(
+        policy.resolve({ thread, modelSelection: { ...modelSelection, model: "other" } }),
+      );
+      assert.equal(changed._tag, "AgentProfileError");
+      revoked = true;
+      const refused = yield* Effect.flip(policy.resolve({ thread, modelSelection }));
+      assert.equal(refused._tag, "AgentProfileError");
+      if (refused._tag === "AgentProfileError") assert.equal(refused.reason, "revoked");
+    }).pipe(Effect.provide(enforcing));
+  }),
+);
 
 it.layer(layerTest)("RuntimePolicyV2", (it) => {
   it.effect("asks for Antigravity command approval when a stored Auto thread falls back", () =>

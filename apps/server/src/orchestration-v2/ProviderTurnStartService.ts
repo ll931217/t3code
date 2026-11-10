@@ -57,6 +57,9 @@ import {
 } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as AgentDelegationStore from "../agents/AgentDelegationStore.ts";
+import * as AgentDelegationAuthority from "../agents/AgentDelegationAuthority.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import {
   isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
@@ -161,6 +164,13 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const delegationStore = yield* Effect.serviceOption(AgentDelegationStore.AgentDelegationStore);
+    const delegationAuthority = yield* Effect.serviceOption(
+      AgentDelegationAuthority.AgentDelegationAuthority,
+    );
+    const environmentIdentity = yield* Effect.serviceOption(
+      ServerEnvironment.ServerEnvironmentIdentity,
+    );
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
     const resolveRecreateBase = Effect.fn("ProviderTurnStartService.resolveRecreateBase")(
@@ -1726,6 +1736,32 @@ export const layer: Layer.Layer<
     return ProviderTurnStartServiceV2.of({
       start: Effect.fn("ProviderTurnStartService.start")(
         function* (input) {
+          if (Option.isSome(delegationStore)) {
+            if (Option.isNone(environmentIdentity))
+              return yield* new ProviderTurnStartError({ runId: input.runId });
+            const child = {
+              environmentId: yield* environmentIdentity.value.getEnvironmentId,
+              threadId: input.threadId,
+            };
+            let admission = yield* delegationStore.value.get(child);
+            if (admission !== null && admission.root.environmentId !== child.environmentId) {
+              if (Option.isNone(delegationAuthority))
+                return yield* new ProviderTurnStartError({ runId: input.runId });
+              const grant = yield* delegationAuthority.value.refresh(
+                child,
+                admission.status === "completed" ? "active" : undefined,
+              );
+              if (grant === null) return yield* new ProviderTurnStartError({ runId: input.runId });
+              admission = grant.reservation;
+            } else if (admission?.status === "completed")
+              admission = yield* delegationStore.value.transition(child, "active", true);
+            if (admission?.status === "cancelled")
+              return yield* new ProviderTurnStartError({ runId: input.runId });
+            if (admission !== null && admission.status !== "active") {
+              yield* delegationStore.value.deferStart({ child, runId: input.runId });
+              return;
+            }
+          }
           // Storage cleanup removes worktrees under the same lease. Only startup
           // holds it; the provider turn runs after it is released.
           const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);

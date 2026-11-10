@@ -1,4 +1,5 @@
 import {
+  AgentProfileError,
   isRuntimeModeAbove,
   managedRuntimeModeCeilingMessage,
   ModelSelection,
@@ -8,6 +9,7 @@ import {
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
+import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,6 +20,8 @@ import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as AgentProfiles from "../agents/AgentProfiles.ts";
+import { assertAgentProfileCompatible } from "../agents/agentProfilePolicy.ts";
 
 export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyResolveError>()(
   "RuntimePolicyResolveError",
@@ -56,6 +60,7 @@ export const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeil
 export const RuntimePolicyV2Error = Schema.Union([
   RuntimePolicyResolveError,
   RuntimePolicyAboveCeilingError,
+  AgentProfileError,
 ]);
 export type RuntimePolicyV2Error = typeof RuntimePolicyV2Error.Type;
 
@@ -189,6 +194,59 @@ export const layerFromProjectStore: Layer.Layer<
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
+        });
+      }),
+    });
+  }),
+);
+
+export const layerEnforcingProfiles = Layer.effect(
+  RuntimePolicyV2,
+  Effect.gen(function* () {
+    const base = yield* RuntimePolicyV2;
+    const profiles = yield* AgentProfiles.AgentProfiles;
+    const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    return RuntimePolicyV2.of({
+      resolve: Effect.fn("RuntimePolicyV2.resolveProfile")(function* (input) {
+        const policy = yield* base.resolve(input);
+        const snapshot = yield* profiles.getThreadSnapshot(input.thread.id);
+        if (snapshot === null) return policy;
+        yield* profiles.assertSnapshotAllowed(snapshot.id);
+        const original = snapshot.root.profile;
+        const profile =
+          snapshot.writablePaths === undefined
+            ? original
+            : {
+                ...original,
+                permissions: { ...original.permissions, writablePaths: snapshot.writablePaths },
+              };
+        const instance = yield* instances.getInstance(input.modelSelection.instanceId);
+        if (
+          instance === undefined ||
+          stableStringify(profile.modelSelection) !== stableStringify(input.modelSelection)
+        ) {
+          return yield* new AgentProfileError({
+            reason: "model-unavailable",
+            profileId: profile.id,
+          });
+        }
+        yield* assertAgentProfileCompatible(profile, instance.driverKind);
+        if (!policy.cwd)
+          return yield* new AgentProfileError({ reason: "wrong-scope", profileId: profile.id });
+        return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          ...policy,
+          agentProfile: profile,
+          approvalPolicy: profile.permissions.approvalPolicy,
+          sandboxPolicy:
+            profile.permissions.filesystem === "read-only"
+              ? { type: "readOnly", networkAccess: profile.permissions.network }
+              : {
+                  type: "workspaceWrite",
+                  writableRoots: [policy.cwd],
+                  networkAccess: profile.permissions.network,
+                  excludeTmpdirEnvVar: true,
+                  excludeSlashTmp: true,
+                },
         });
       }),
     });
