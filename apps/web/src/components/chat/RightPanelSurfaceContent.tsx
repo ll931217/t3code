@@ -33,6 +33,9 @@ const DevicePanel = lazy(() =>
   import("../device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
+const AgentsPanel = lazy(() =>
+  import("./ConnectedAgentsPanel").then((module) => ({ default: module.ConnectedAgentsPanel })),
+);
 
 type RightPanelTerminalProps = Omit<
   PersistentThreadTerminalPanelProps,
@@ -83,6 +86,12 @@ export function RightPanelSurfaceContent(props: {
   const { surface, threadRef, visible, onCloseSurface } = props;
   if (surface === null) return null;
   switch (surface.kind) {
+    case "agents":
+      return (
+        <Suspense fallback={null}>
+          <AgentsPanel threadRef={threadRef} visible={visible} />
+        </Suspense>
+      );
     case "preview":
       return (
         <Suspense fallback={null}>

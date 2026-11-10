@@ -13,6 +13,7 @@ import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
+  "agents",
   "diff",
   "files",
   "file",
@@ -34,7 +35,28 @@ export interface DeviceTabTarget {
   name: string;
 }
 
+export interface AgentGraphView {
+  x: number;
+  y: number;
+  zoom: number;
+  split: number;
+  selectedKey: string | null;
+  collapsedKeys: string[];
+  follow: boolean;
+}
+
+export const DEFAULT_AGENT_GRAPH_VIEW: AgentGraphView = {
+  x: 0,
+  y: 24,
+  zoom: 1,
+  split: 0.55,
+  selectedKey: null,
+  collapsedKeys: [],
+  follow: false,
+};
+
 export type RightPanelSurface =
+  | { id: "agents"; kind: "agents"; view?: AgentGraphView }
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
@@ -79,7 +101,7 @@ export type RightPanelSurface =
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 14;
+const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
@@ -104,6 +126,7 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
+  setAgentsView: (ref: ScopedThreadRef, view: AgentGraphView) => void;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
@@ -211,6 +234,8 @@ const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "side-chat">,
 ): RightPanelSurface => {
   switch (kind) {
+    case "agents":
+      return { id: "agents", kind };
     case "diff":
       return { id: "diff", kind };
     case "files":
@@ -489,7 +514,35 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     const kind = (surface as { kind?: string }).kind;
-                    if (kind === "plan" || kind === "agents") return [];
+                    if (kind === "plan") return [];
+                    if (surface.kind === "agents") {
+                      const view = surface.view;
+                      return [
+                        {
+                          id: "agents",
+                          kind: "agents",
+                          ...(view &&
+                          Number.isFinite(view.x) &&
+                          Number.isFinite(view.y) &&
+                          Number.isFinite(view.zoom) &&
+                          Number.isFinite(view.split) &&
+                          (view.selectedKey === null || typeof view.selectedKey === "string") &&
+                          Array.isArray(view.collapsedKeys) &&
+                          typeof view.follow === "boolean"
+                            ? {
+                                view: {
+                                  ...view,
+                                  zoom: Math.max(0.15, Math.min(2, view.zoom)),
+                                  split: Math.max(0.2, Math.min(0.8, view.split)),
+                                  collapsedKeys: view.collapsedKeys
+                                    .filter((key) => typeof key === "string")
+                                    .slice(0, 500),
+                                },
+                              }
+                            : {}),
+                        },
+                      ];
+                    }
                     if (
                       (surface.kind === "file" || surface.kind === "files") &&
                       "folderTrail" in surface &&
@@ -625,6 +678,15 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
     (set, get) => ({
       byThreadKey: {},
+      setAgentsView: (ref, view) =>
+        set((state) => ({
+          byThreadKey: updateThreadStateMap(state.byThreadKey, scopedThreadKey(ref), (current) => ({
+            ...current,
+            surfaces: current.surfaces.map((surface) =>
+              surface.kind === "agents" ? { ...surface, view } : surface,
+            ),
+          })),
+        })),
       pendingMaximizeThreadKey: null,
       requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
       consumeMaximizeRequest: (ref) => {

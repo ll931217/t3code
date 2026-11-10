@@ -653,7 +653,7 @@ describe("rightPanelStore", () => {
     { kind: "plan", isOpen: true },
     { kind: "agents", isOpen: true },
     { kind: "agents", isOpen: false },
-  ])("drops $kind with isOpen=$isOpen and falls back", ({ kind, isOpen }) => {
+  ])("migrates $kind with isOpen=$isOpen", ({ kind, isOpen }) => {
     expect(
       migratePersistedRightPanelState({
         byThreadKey: {
@@ -675,14 +675,17 @@ describe("rightPanelStore", () => {
     ).toEqual({
       byThreadKey: {
         "env-1:thread-A": {
-          isOpen: false,
-          activeSurfaceId: null,
-          surfaces: [],
+          isOpen: kind === "agents" ? isOpen : false,
+          activeSurfaceId: kind === "agents" ? "agents" : null,
+          surfaces: kind === "agents" ? [{ id: "agents", kind: "agents" }] : [],
         },
         "env-1:thread-B": {
           isOpen,
-          activeSurfaceId: "diff",
-          surfaces: [{ id: "diff", kind: "diff" }],
+          activeSurfaceId: kind === "agents" ? "agents" : "diff",
+          surfaces: [
+            ...(kind === "agents" ? [{ id: "agents", kind: "agents" }] : []),
+            { id: "diff", kind: "diff" },
+          ],
         },
       },
       threadPanelVisibilityByThreadKey: {},

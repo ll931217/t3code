@@ -36,6 +36,7 @@ import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dn
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  Bot,
   Smartphone,
   ChevronDown,
   ChevronLeft,
@@ -138,6 +139,7 @@ export interface RightPanelTabsProps {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddAgents?: (() => void) | undefined;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
@@ -319,6 +321,7 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddAgents?: (() => void) | undefined;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
@@ -394,6 +397,18 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
     },
+    ...(props.onAddAgents
+      ? [
+          {
+            label: "Agents",
+            icon: Bot,
+            shortcut: "A",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddAgents,
+          },
+        ]
+      : []),
     ...(props.onAddSideChat
       ? [
           {
@@ -573,6 +588,8 @@ function surfaceTitle(
   terminalLabelsById: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
+    case "agents":
+      return "Agents";
     case "diff":
       return "Diff";
     case "files":
@@ -655,6 +672,8 @@ function SurfaceIcon({
   pullRequestStatusSeed: PullRequestTabStatusSeed | undefined;
 }) {
   switch (surface.kind) {
+    case "agents":
+      return <Bot className="size-3 shrink-0" />;
     case "preview":
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
     case "diff":
@@ -1091,6 +1110,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   };
 
   const addSurfaceActions = [
+    ...(props.onAddAgents
+      ? [
+          {
+            label: "Agents",
+            icon: Bot,
+            shortcut: "A",
+            available: true,
+            disabledReason: "",
+            onClick: props.onAddAgents,
+          },
+        ]
+      : []),
     {
       label: "Browser",
       icon: Globe2,
@@ -1530,6 +1561,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
+            onAddAgents={props.onAddAgents}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
