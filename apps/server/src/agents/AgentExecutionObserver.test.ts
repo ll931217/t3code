@@ -39,7 +39,7 @@ it.effect("records only observed delivery stages once and invalidates earlier ev
         threadId,
         occurredAt: now,
         payload: {
-          id: "task",
+          id: "node:delegated-task:command%3Amcp%3A31e36a58-5977-47df-922e-812bc7f2fe5d%3Adelegate-task%3A2f00dc11-4e9c-40ba-a183-3caa1695fe18",
           threadId,
           runId: null,
           parentNodeId: "root",
@@ -154,7 +154,7 @@ it.effect(
           threadId,
           occurredAt: now,
           payload: {
-            id: "message",
+            id: "message:thread:thread%3Adelegated-task%3Acommand%253Amcp%253A31e36a58-5977-47df-922e-812bc7f2fe5d%253Adelegate-task%253A2f00dc11-4e9c-40ba-a183-3caa1695fe18:ordinal:1",
             threadId,
             runId: null,
             nodeId: null,
