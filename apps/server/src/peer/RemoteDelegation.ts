@@ -224,9 +224,8 @@ const make = Effect.gen(function* () {
       }
       const parentNodeId = parentRun.rootNodeId;
       const { target } = input;
-      // A worktree there would branch from a commit this checkout has and the
-      // other may not, so a remote task runs in that project's checkout.
-      if (input.isolation === "worktree") {
+      // Managed profiles isolate from the destination commit; legacy tasks use its checkout.
+      if (input.isolation === "worktree" && input.profileId === undefined) {
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message:
@@ -305,6 +304,11 @@ const make = Effect.gen(function* () {
           profileId: input.profileId,
           ...(input.writablePaths === undefined ? {} : { writablePaths: input.writablePaths }),
         });
+        if (input.isolation !== undefined && input.isolation !== snapshot.root.profile.isolation)
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message: "Requested isolation differs from the reviewed destination profile.",
+          });
         const grant = yield* authority.value.reserve({
           parent: { environmentId: hereId, threadId: scope.thread.threadId },
           child: {

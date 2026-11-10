@@ -1146,6 +1146,18 @@ it.effect("refuses worktree isolation for a task there before launching anything
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain("isolation");
+      const managed = yield* Effect.flip(
+        a.remote.delegate(
+          { ...parentScope, thread: parentScope.thread! },
+          {
+            task: "Run the suite with a reviewed destination profile.",
+            target: { environmentId: box.environmentId, projectId: boxProject },
+            profileId: "personal/worker",
+            isolation: "worktree",
+          },
+        ),
+      );
+      expect(managed.message).toContain("pinned parent");
       expect(yield* Ref.get(thread.launched)).toBeNull();
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
