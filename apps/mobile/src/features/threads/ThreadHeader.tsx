@@ -1,4 +1,6 @@
 import { AppBar } from "../../components/ui/AppBar";
+import { useNavigation } from "@react-navigation/native";
+import { useThreadSelection } from "../../state/use-thread-selection";
 import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-navigation";
@@ -19,6 +21,8 @@ export function ThreadHeader(props: {
   readonly inspectorMode: ThreadInspectorMode | null;
   readonly onOpenFilesInspector: () => void;
 }) {
+  const navigation = useNavigation();
+  const { selectedThreadDetailRef } = useThreadSelection();
   const goBack = useWorkspaceBackNavigation("threads");
   const { panes, toggleAuxiliaryPane, composerKeyboardActive, startNewTask } =
     useAdaptiveWorkspaceLayout();
@@ -38,6 +42,12 @@ export function ThreadHeader(props: {
       ]
     : [];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
+  if (!props.draft && selectedThreadDetailRef)
+    actions.push({
+      accessibilityLabel: "Agents and profiles",
+      icon: "person.2",
+      onPress: () => navigation.navigate("ThreadAgents", selectedThreadDetailRef),
+    });
 
   return (
     <AppBar
