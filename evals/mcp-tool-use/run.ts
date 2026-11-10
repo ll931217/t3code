@@ -55,6 +55,7 @@ import { DeviceToolkit } from "../../apps/server/src/mcp/toolkits/device/tools.t
 import { EnvironmentToolkit } from "../../apps/server/src/mcp/toolkits/environment/tools.ts";
 import { HtmlToolkit } from "../../apps/server/src/mcp/toolkits/html/tools.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
+import { AgentExecutionToolkit } from "../../apps/server/src/mcp/toolkits/agentExecution/tools.ts";
 import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
 import { ProjectToolkit } from "../../apps/server/src/mcp/toolkits/project/tools.ts";
@@ -425,6 +426,7 @@ export const normalizeToolInput = (name: string, input: unknown) => {
 // McpHttpServer advertises each tool's JSON schema, and Claude Code passes the MCP name,
 // description, and schema through unchanged.
 const t3SourceTools: ReadonlyArray<Tool.Any> = [
+  AgentExecutionToolkit,
   OrchestratorToolkit,
   ThreadToolkit,
   AttachmentToolkit,
@@ -2006,8 +2008,11 @@ const postModel = Effect.fn("evaluateMcpToolUse.postModel")(function* (
       times: 8,
     }),
   );
+  const anthropicBaseUrl = yield* Config.String("T3_EVAL_ANTHROPIC_BASE_URL").pipe(
+    Config.withDefault("https://api.anthropic.com/v1"),
+  );
   const response = yield* HttpClientRequest.post(
-    `${proxy?.url ?? "https://api.anthropic.com/v1"}/${responses ? "responses" : "messages"}`,
+    `${proxy?.url ?? anthropicBaseUrl}/${responses ? "responses" : "messages"}`,
   ).pipe(
     HttpClientRequest.setHeaders({
       ...(apiKey ? { "x-api-key": apiKey } : {}),
