@@ -194,10 +194,14 @@ const make = Effect.gen(function* () {
         if (current.status === status) return current;
         if (
           current.status === "cancelled" ||
-          (current.status === "completed" && status !== "active")
+          (current.status === "completed" && status !== "active" && status !== "cancelled")
         )
           return yield* new AgentDelegationError({ reason: "invalid-transition" });
-        if (current.status === "active" && !providerSuspended)
+        if (
+          (current.status === "active" ||
+            (current.status === "completed" && status === "cancelled")) &&
+          !providerSuspended
+        )
           return yield* new AgentDelegationError({ reason: "provider-not-suspended" });
         if (status === "active") {
           const records = yield* list(current.root);

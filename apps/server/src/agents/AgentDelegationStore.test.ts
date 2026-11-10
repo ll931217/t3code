@@ -76,6 +76,27 @@ it.layer(AgentDelegationStore.layer.pipe(Layer.provideMerge(SqlitePersistence.la
               "total-limit",
             );
           }).pipe(Effect.provide(AgentDelegationStore.layer));
+          yield* store.transition(ref("second"), "completed", true);
+          assert.strictEqual(
+            (yield* store.transition(ref("second"), "cancelled", false).pipe(Effect.flip)).reason,
+            "provider-not-suspended",
+          );
+          assert.strictEqual(
+            (yield* store.transition(ref("second"), "waiting", true).pipe(Effect.flip)).reason,
+            "invalid-transition",
+          );
+          const cancelled = yield* store.transition(ref("second"), "cancelled", true);
+          assert.strictEqual(cancelled.status, "cancelled");
+          assert.deepStrictEqual(
+            yield* store.transition(ref("second"), "cancelled", true),
+            cancelled,
+          );
+          for (const status of ["active", "waiting", "completed"] as const) {
+            assert.strictEqual(
+              (yield* store.transition(ref("second"), status, true).pipe(Effect.flip)).reason,
+              "invalid-transition",
+            );
+          }
           const competing = yield* Effect.forEach(
             ["race-one", "race-two", "race-three"],
             (id) =>
