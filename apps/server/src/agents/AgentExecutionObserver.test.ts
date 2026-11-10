@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
 import { CommandId, EnvironmentId, OrchestrationV2StoredEvent, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -17,6 +18,7 @@ const environmentId = EnvironmentId.make("local");
 const testLayer = AgentExecutionObserver.layer.pipe(
   Layer.provideMerge(AgentExecutionStore.layer),
   Layer.provideMerge(database),
+  Layer.provide(NodeCrypto.layer),
   Layer.provide(Layer.mock(EventSink.EventSinkV2)({})),
   Layer.provide(
     Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {

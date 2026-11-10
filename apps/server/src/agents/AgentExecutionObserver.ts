@@ -1,3 +1,5 @@
+import * as Digest from "effect/crypto/Digest";
+import * as Hex from "effect/encoding/Hex";
 import { CommandId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -11,6 +13,11 @@ import { forkParked } from "../serverActivation.ts";
 import * as AgentExecutionStore from "./AgentExecutionStore.ts";
 
 const make = Effect.gen(function* () {
+  const digest = yield* Digest.Digest;
+  const communicationId = Effect.fn("AgentExecutionObserver.communicationId")(function* (id: string) {
+    if (id.length <= 128) return id;
+    return Hex.encode(yield* digest.digest(Digest.sha256, new TextEncoder().encode(id)));
+  });
   const records = yield* AgentExecutionStore.AgentExecutionStore;
   const events = yield* EventSink.EventSinkV2;
   const sql = yield* SqlClient.SqlClient;
@@ -42,7 +49,7 @@ const make = Effect.gen(function* () {
       if (message.senderThreadId !== undefined) {
         yield* records.recordCommunication(
           {
-            id: `${message.id}:delivered`,
+            id: yield* communicationId(`${message.id}:delivered`),
             source: { environmentId, threadId: message.senderThreadId },
             target: { environmentId, threadId: event.threadId },
             kind: "message",
@@ -89,7 +96,7 @@ const make = Effect.gen(function* () {
         }
         yield* records.recordCommunication(
           {
-            id: `${task.id}:dispatch`,
+            id: yield* communicationId(`${task.id}:dispatch`),
             source: parent,
             target,
             kind: "dispatch",
@@ -101,7 +108,7 @@ const make = Effect.gen(function* () {
         if (task.startedAt !== null) {
           yield* records.recordCommunication(
             {
-              id: `${task.id}:started`,
+              id: yield* communicationId(`${task.id}:started`),
               source: parent,
               target,
               kind: "dispatch",
@@ -114,7 +121,7 @@ const make = Effect.gen(function* () {
         if (task.result !== null) {
           yield* records.recordCommunication(
             {
-              id: `${task.id}:result`,
+              id: yield* communicationId(`${task.id}:result`),
               source: target,
               target: parent,
               kind: "result",
@@ -127,7 +134,7 @@ const make = Effect.gen(function* () {
           if (delivery === "delivered" || delivery === "acknowledged") {
             yield* records.recordCommunication(
               {
-                id: `${task.id}:result:${delivery}`,
+                id: yield* communicationId(`${task.id}:result:${delivery}`),
                 source: target,
                 target: parent,
                 kind: "result",
