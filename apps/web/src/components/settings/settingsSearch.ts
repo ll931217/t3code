@@ -633,6 +633,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["claude context compaction idle cache tokens usage summary resume"],
   },
   {
+    id: "agent-profiles",
+    title: "Agent profiles",
+    to: "/settings/providers",
+    targetId: "agent-profiles",
+    scope: "environment-defaults",
+    searchTerms: [
+      "persona orchestrator worker delegation model prompt permissions tools verification",
+    ],
+  },
+  {
     id: "auto-settle-merged-threads",
     title: "Auto-settle merged threads",
     to: "/settings/threads",
