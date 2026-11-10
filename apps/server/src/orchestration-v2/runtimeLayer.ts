@@ -252,7 +252,13 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
   Layer.provide(
     AgentProfileDelegation.layer.pipe(
       Layer.provide(layerAgentDelegationAuthority),
-      Layer.provide(Layer.mergeAll(AgentProfiles.layer, AgentDelegationStore.layer)),
+      Layer.provide(
+        Layer.mergeAll(
+          AgentProfiles.layer,
+          AgentDelegationStore.layer,
+          AgentDelegationAuthorityStore.layer,
+        ),
+      ),
     ),
   ),
   Layer.provide(
@@ -446,7 +452,13 @@ export const layerProduction = Layer.mergeAll(
   ),
   AgentProfileDelegation.layer.pipe(
     Layer.provide(layerAgentDelegationAuthority),
-    Layer.provide(Layer.mergeAll(AgentProfiles.layer, AgentDelegationStore.layer)),
+    Layer.provide(
+      Layer.mergeAll(
+        AgentProfiles.layer,
+        AgentDelegationStore.layer,
+        AgentDelegationAuthorityStore.layer,
+      ),
+    ),
   ),
   Layer.effectDiscard(
     Effect.flatMap(AgentDelegationRuntime.AgentDelegationRuntime, (runtime) =>

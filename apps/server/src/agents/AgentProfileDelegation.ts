@@ -59,7 +59,7 @@ const isFailure = Schema.is(OrchestratorMcpFailure);
 const make = Effect.gen(function* () {
   const profiles = yield* AgentProfiles.AgentProfiles;
   const authority = yield* Effect.serviceOption(Authority.AgentDelegationAuthority);
-  const grants = yield* Effect.serviceOption(GrantStore.AgentDelegationAuthorityStore);
+  const grants = yield* GrantStore.AgentDelegationAuthorityStore;
   const sql = yield* SqlClient.SqlClient;
   const digest = yield* Digest.Digest;
   const admissions = yield* AgentDelegationStore.AgentDelegationStore;
@@ -81,9 +81,7 @@ const make = Effect.gen(function* () {
       const reservation = yield* admissions.get({ environmentId, threadId });
       if (command.type === "thread.create") {
         const inbound =
-          reservation !== null && Option.isSome(grants)
-            ? yield* grants.value.inbound({ environmentId, threadId })
-            : null;
+          reservation !== null ? yield* grants.inbound({ environmentId, threadId }) : null;
         if (
           reservation !== null &&
           (inbound === null ||

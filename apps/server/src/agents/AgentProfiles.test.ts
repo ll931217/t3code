@@ -20,6 +20,7 @@ import * as AgentProfiles from "./AgentProfiles.ts";
 import * as AgentProfileStops from "./AgentProfileStops.ts";
 import * as AgentProfileDelegation from "./AgentProfileDelegation.ts";
 import * as AgentDelegationStore from "./AgentDelegationStore.ts";
+import * as AgentDelegationAuthorityStore from "./AgentDelegationAuthorityStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { derive } from "@t3tools/provider-core/server/IdAllocator";
 
@@ -175,7 +176,11 @@ it.effect(
         ).toBe("capability_denied");
       }).pipe(
         Effect.provide(
-          AgentProfileDelegation.layer.pipe(Layer.provide(AgentDelegationStore.layer)),
+          AgentProfileDelegation.layer.pipe(
+            Layer.provide(
+              Layer.merge(AgentDelegationStore.layer, AgentDelegationAuthorityStore.layer),
+            ),
+          ),
         ),
         Effect.provideService(ServerEnvironment.ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make("local")),

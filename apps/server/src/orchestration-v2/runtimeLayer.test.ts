@@ -1,3 +1,7 @@
+import * as AgentDelegationStore from "../agents/AgentDelegationStore.ts";
+import * as AgentDelegationAuthorityStore from "../agents/AgentDelegationAuthorityStore.ts";
+import * as Schema from "effect/Schema";
+import { AgentProfileSnapshot } from "@t3tools/contracts";
 import { PullRequestProviderError } from "@t3tools/source-control-core/server/PullRequestProvider";
 import { SourceControlProviderKind } from "@t3tools/contracts";
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
@@ -116,6 +120,8 @@ const layerPlatformTest = Layer.merge(
 const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-orchestration-v2-runtime-layer-",
 });
+
+const decodeProfileSnapshot = Schema.decodeUnknownEffect(AgentProfileSnapshot);
 
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -305,6 +311,8 @@ const layerProjectionReplayTest = ProjectionReplay.layer.pipe(
 
 const layerTest = Layer.mergeAll(
   RuntimeLayer.layer,
+  AgentDelegationStore.layer,
+  AgentDelegationAuthorityStore.layer,
   layerProjectionReplayTest,
   RuntimeLayer.layerEventSink,
   ProjectStore.layer,
@@ -899,6 +907,86 @@ const layerSharedApplicationDataPlaneTest = Layer.mergeAll(
 );
 
 it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
+  it.effect(
+    "admits a remote child using its persisted inbound authority in the production runtime",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const admissions = yield* AgentDelegationStore.AgentDelegationStore;
+        const grants = yield* AgentDelegationAuthorityStore.AgentDelegationAuthorityStore;
+        const child = {
+          environmentId: EnvironmentId.make("runtime-layer-test"),
+          threadId: ThreadId.make("inbound-child"),
+        };
+        const parent = {
+          environmentId: EnvironmentId.make("remote-root"),
+          threadId: ThreadId.make("parent"),
+        };
+        const commandId = CommandId.make("inbound-create");
+        const projectId = ProjectId.make("inbound-project");
+        const snapshot = yield* decodeProfileSnapshot({
+          id: "inbound-snapshot",
+          root: {
+            fingerprint: "inbound-version",
+            sourceProjectId: null,
+            profile: {
+              id: "personal/worker",
+              name: "Worker",
+              description: "",
+              prompt: "",
+              modelSelection,
+              permissions: {
+                filesystem: "read-only",
+                commands: false,
+                network: false,
+                writablePaths: [],
+                nativeTools: "capability-defaults",
+                mcpTools: [],
+                approvalPolicy: "never",
+                integrations: { commit: false, merge: false, publish: false },
+              },
+              delegation: { profiles: [], maxConcurrent: 1, maxAgents: 2, maxDepth: 1 },
+              isolation: "worktree",
+            },
+          },
+          dependencies: [],
+        });
+        const reservation = {
+          commandId,
+          root: parent,
+          parent,
+          child,
+          snapshotId: snapshot.id,
+          requestKey: "reviewed-request",
+          limits: { maxConcurrent: 1, maxAgents: 2, maxDepth: 1 },
+          depth: 1,
+          status: "queued" as const,
+        };
+        yield* admissions.mirror(reservation);
+        const grant = yield* grants.issue(reservation, snapshot);
+        yield* grants.accept(grant, "linked-session", projectId);
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          commandId,
+          threadId: child.threadId,
+          projectId,
+          title: "Remote worker",
+          modelSelection,
+          runtimeMode: "auto",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdBy: "agent",
+          creationSource: "mcp",
+          linkOrigin: { sessionId: "linked-session", label: "Root", access: "auto" },
+          delegatedFrom: { ...parent, title: "Parent" },
+        });
+        assert.strictEqual(
+          (yield* orchestrator.getThreadProjection(child.threadId)).thread.id,
+          child.threadId,
+        );
+      }),
+  );
   const seedFailingRollbackThread = (name: string) =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
