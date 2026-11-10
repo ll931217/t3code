@@ -73,3 +73,8 @@ export * from "./secretRequest.ts";
 export * from "./secretReference.ts";
 export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
+export * from "./agentProfiles.ts";
+export * from "./agentExecution.ts";
+export * from "./agentWorktreeActions.ts";
+export * from "./agentProfilesRpc.ts";
+export * from "./agentDelegationPeer.ts";

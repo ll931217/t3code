@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { AuthMcpClientAccess } from "./auth.ts";
+import { AgentProfileId, AgentDelegationWritablePaths } from "./agentProfiles.ts";
 import {
   ContextTransferId,
   EnvironmentId,
@@ -168,6 +169,14 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
 
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   task: OrchestratorMcpPrompt,
+  profileId: Schema.optional(AgentProfileId).annotate({
+    description:
+      "An allowed profile from this agent's pinned delegation graph. Required for profile-managed agents.",
+  }),
+  writablePaths: Schema.optional(AgentDelegationWritablePaths).annotate({
+    description:
+      "Narrow the child profile to these relative workspace paths. Paths must stay within that profile's reviewed write scope.",
+  }),
   target: Schema.optional(OrchestratorMcpTarget),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
