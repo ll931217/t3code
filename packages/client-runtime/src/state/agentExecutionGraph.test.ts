@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, NodeId, ThreadId, type OrchestrationV2Subagent } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  NodeId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  type OrchestrationV2Subagent,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import { deriveAgentExecutionGraph } from "./agentExecutionGraph.ts";
 
@@ -96,11 +104,31 @@ describe("agent execution graph", () => {
 
   it("deduplicates projected workers, preserves live status, and terminates malformed cycles", () => {
     const child = { ...root, threadId: ThreadId.make("child") };
+    const workers = (
+      [
+        ["idle", "completed"],
+        ["idle", "failed"],
+        ["idle", "cancelled"],
+        ["idle", "interrupted"],
+        ["idle", "running"],
+        ["running", "completed"],
+      ] as const
+    ).map(([liveStatus, taskStatus]) => ({
+      ref: { ...root, threadId: ThreadId.make(`${liveStatus}-${taskStatus}`) },
+      liveStatus,
+      taskStatus,
+    }));
     const graph = deriveAgentExecutionGraph({
       root,
       threads: [
         { ref: root, parent: child, title: "Root", status: "running" },
         { ref: child, parent: root, title: "Worker", status: "waiting" },
+        ...workers.map((worker) => ({
+          ref: worker.ref,
+          parent: root,
+          title: worker.ref.threadId,
+          status: worker.liveStatus,
+        })),
       ],
       projections: [
         {
@@ -116,6 +144,30 @@ describe("agent execution graph", () => {
               model: "model",
               result: "Done",
             } as OrchestrationV2Subagent,
+            ...workers.map(
+              (worker) =>
+                ({
+                  id: NodeId.make(worker.ref.threadId),
+                  threadId: root.threadId,
+                  runId: null,
+                  parentNodeId: NodeId.make("run"),
+                  origin: "provider_native",
+                  createdBy: "agent",
+                  driver: ProviderDriverKind.make("codex"),
+                  providerInstanceId: ProviderInstanceId.make("codex"),
+                  providerThreadId: null,
+                  childThreadId: worker.ref.threadId,
+                  nativeTaskRef: null,
+                  title: worker.ref.threadId,
+                  prompt: "",
+                  status: worker.taskStatus,
+                  model: "model",
+                  result: null,
+                  startedAt: null,
+                  completedAt: null,
+                  updatedAt: DateTime.makeUnsafe("2026-11-10T00:00:00Z"),
+                }) satisfies OrchestrationV2Subagent,
+            ),
             ...["cycle-a", "cycle-b", "self"].map(
               (id, index) =>
                 ({
@@ -138,11 +190,15 @@ describe("agent execution graph", () => {
     expect(graph.nodes.map((node) => [node.title, node.status])).toEqual([
       ["Root", "running"],
       ["Worker", "waiting"],
+      ...workers.map((worker) => [
+        worker.ref.threadId,
+        worker.liveStatus === "idle" ? worker.taskStatus : worker.liveStatus,
+      ]),
       ["cycle-a", "running"],
       ["self", "running"],
       ["cycle-b", "running"],
     ]);
-    expect(graph.edges).toHaveLength(4);
+    expect(graph.edges).toHaveLength(4 + workers.length);
     expect(graph.nodes[1]?.objective).toBe("Implement");
   });
 });

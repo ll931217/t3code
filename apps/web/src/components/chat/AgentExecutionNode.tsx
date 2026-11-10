@@ -32,9 +32,11 @@ export function AgentExecutionNode({
         <Bot className="size-3 shrink-0" />
         <span className="truncate">{title}</span>
       </span>
-      <span className="w-full whitespace-pre-wrap wrap-anywhere text-xs text-muted-foreground">
-        {objective}
-      </span>
+      {objective ? (
+        <span className="w-full whitespace-pre-wrap wrap-anywhere text-xs text-muted-foreground">
+          {objective}
+        </span>
+      ) : null}
       <AgentNodeStatus status={status} childCount={childCount} />
     </button>
   );

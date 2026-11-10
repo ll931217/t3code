@@ -592,7 +592,7 @@ export function AgentsPanel(props: {
                       ? props.executionRecords?.get(scopedThreadKey(node.ref))?.objective
                       : null) ||
                     node.objective ||
-                    "Awaiting assignment"
+                    ""
                   }
                   status={node.status}
                   childCount={children}

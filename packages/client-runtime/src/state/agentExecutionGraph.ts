@@ -112,7 +112,10 @@ export function deriveAgentExecutionGraph(input: {
         owner: projection.owner,
         title: live?.missing === false ? live.title : agent.title || "Agent",
         objective: agent.prompt || null,
-        status: live?.missing === false ? (live.status ?? agent.status) : agent.status,
+        status:
+          live?.missing === false && live.status !== "idle"
+            ? (live.status ?? agent.status)
+            : agent.status,
         model: live?.model ?? agent.model,
         projectName: live?.projectName ?? agent.remoteChild?.label ?? null,
         progress: agent.progress ?? null,
