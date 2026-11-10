@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
   ThreadId,
@@ -14,6 +15,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { browserMiniPlayerSource, usePreviewMiniPlayerStore } from "../previewMiniPlayerStore";
 import { useRightPanelStore } from "../rightPanelStore";
+import { environmentServerConfigsAtom } from "../state/server";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -40,6 +42,8 @@ const state = vi.hoisted(() => ({
   toasts: [] as string[],
   afterRequest: undefined as ((action: string) => void) | undefined,
   sessionLookupFails: false,
+  automaticCleanup: false,
+  profileBound: false,
 }));
 
 vi.mock("react", () => ({
@@ -70,15 +74,51 @@ vi.mock("../state/use-atom-command", () => ({
     },
 }));
 vi.mock("../state/use-atom-query-runner", () => ({
-  useAtomQueryRunner: () => async (environmentId: string) =>
-    state.sessionLookupFails
-      ? AsyncResult.failure(Cause.fail(new Error("Session lookup failed")))
-      : AsyncResult.success({
-          authenticated: true,
-          scopes: [...(state.scopes.get(environmentId) ?? [])],
-          auth: { serverUpdateScope: "environment:maintain" },
-        }),
+  useAtomQueryRunner: (query: string) => async (environmentId: string) =>
+    query === "profileSnapshot"
+      ? AsyncResult.success(state.profileBound ? { id: "snapshot" } : null)
+      : state.sessionLookupFails
+        ? AsyncResult.failure(Cause.fail(new Error("Session lookup failed")))
+        : AsyncResult.success({
+            authenticated: true,
+            scopes: [...(state.scopes.get(environmentId) ?? [])],
+            auth: { serverUpdateScope: "environment:maintain" },
+          }),
 }));
+vi.mock("../state/agentProfiles", () => ({
+  agentProfileEnvironment: { threadSnapshot: "profileSnapshot" },
+}));
+vi.mock("../rpc/atomRegistry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../rpc/atomRegistry")>();
+  return {
+    ...actual,
+    appAtomRegistry: new Proxy(actual.appAtomRegistry, {
+      get: (target, key) => {
+        if (key !== "get") {
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return (atom: Parameters<typeof actual.appAtomRegistry.get>[0]) =>
+          atom === environmentServerConfigsAtom
+            ? new Map(
+                state.threads.map((thread) => [
+                  thread.environmentId,
+                  {
+                    settings: {
+                      ...DEFAULT_SERVER_SETTINGS,
+                      storageCleanup: {
+                        ...DEFAULT_SERVER_SETTINGS.storageCleanup,
+                        worktreeOnDelete: state.automaticCleanup,
+                      },
+                    },
+                  },
+                ]),
+              )
+            : actual.appAtomRegistry.get(atom);
+      },
+    }),
+  };
+});
 vi.mock("../state/threads", () => ({
   threadEnvironment: Object.fromEntries(
     [
@@ -248,6 +288,8 @@ beforeEach(() => {
   state.toasts = [];
   state.afterRequest = undefined;
   state.sessionLookupFails = false;
+  state.automaticCleanup = false;
+  state.profileBound = false;
   useRightPanelStore.setState(useRightPanelStore.getInitialState(), true);
   useDiffPanelStore.setState(useDiffPanelStore.getInitialState(), true);
   usePreviewMiniPlayerStore.setState(usePreviewMiniPlayerStore.getInitialState(), true);
@@ -359,6 +401,24 @@ describe("thread action permissions", () => {
     expect(state.localEffects).toContain("clear-terminal-ui");
     expect(threadPanelStatePresence(target)).toEqual(panelStateCleared);
   });
+
+  it.each([true, false])(
+    "offers explicit cleanup for retained profiles with automatic cleanup enabled: %s",
+    async (profileBound) => {
+      state.scopes
+        .get(secondary)!
+        .add(AuthOrchestrationOperateScope)
+        .add(AuthSourceControlWriteScope);
+      state.threads[0]!.worktreePath = "/worktrees/thread";
+      state.automaticCleanup = true;
+      state.profileBound = profileBound;
+      expect((await useThreadActions().deleteThread(target))._tag).toBe("Success");
+      expect(state.confirm).toHaveBeenCalledTimes(profileBound ? 1 : 0);
+      expect(state.requests.some((request) => request.action === "removeWorktree")).toBe(
+        profileBound,
+      );
+    },
+  );
 
   it("does not request worktree removal after its grant is revoked during delete", async () => {
     state.scopes

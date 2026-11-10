@@ -32,6 +32,7 @@ import { orchestrationEnvironment } from "../state/orchestration";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
+import { agentProfileEnvironment } from "../state/agentProfiles";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
@@ -321,6 +322,10 @@ export function useThreadActions() {
   const loadSessionState = useAtomQueryRunner(environmentSession.sessionStateAtom, {
     reportFailure: false,
   });
+  const loadProfileSnapshot = useAtomQueryRunner(agentProfileEnvironment.threadSnapshot, {
+    reportFailure: false,
+    refresh: true,
+  });
   const loadWorktreeThreadIds = useAtomQueryRunner(orchestrationEnvironment.worktreeThreadIds, {
     reportFailure: false,
     refresh: true,
@@ -519,7 +524,17 @@ export function useThreadActions() {
     const automaticWorktreeCleanup = environmentSettings
       ? resolveWorktreeCleanup(environmentSettings, thread.projectId).worktreeOnDelete
       : false;
-    if (canDeleteWorktree && localApi && !automaticWorktreeCleanup) {
+    const profileSnapshot =
+      canDeleteWorktree && automaticWorktreeCleanup
+        ? await loadProfileSnapshot({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId },
+          })
+        : null;
+    const retainedProfileWorktree =
+      profileSnapshot !== null &&
+      (profileSnapshot._tag !== "Success" || profileSnapshot.value !== null);
+    if (canDeleteWorktree && localApi && (!automaticWorktreeCleanup || retainedProfileWorktree)) {
       const confirmationResult = await settlePromise(() =>
         localApi.dialogs.confirm(
           [
