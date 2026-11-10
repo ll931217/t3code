@@ -12,6 +12,7 @@ import {
 import * as Option from "effect/Option";
 import * as Authority from "./AgentDelegationAuthority.ts";
 import * as GrantStore from "./AgentDelegationAuthorityStore.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -60,11 +61,19 @@ const make = Effect.gen(function* () {
   const profiles = yield* AgentProfiles.AgentProfiles;
   const authority = yield* Effect.serviceOption(Authority.AgentDelegationAuthority);
   const grants = yield* GrantStore.AgentDelegationAuthorityStore;
+  const cancellations = yield* Cancellations.AgentDelegationCancellations;
   const sql = yield* SqlClient.SqlClient;
   const digest = yield* Digest.Digest;
   const admissions = yield* AgentDelegationStore.AgentDelegationStore;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const environmentId = yield* identity.getEnvironmentId;
+  const assertOpen = Effect.fn("AgentProfileDelegation.assertOpen")(function* (threadId: ThreadId) {
+    if (yield* cancellations.requested({ environmentId, threadId }))
+      return yield* new OrchestratorMcpFailure({
+        code: "capability_denied",
+        message: "This execution tree was cancelled. Launch a new profiled thread.",
+      });
+  });
   const assertCommand = Effect.fn("AgentProfileDelegation.assertCommand")(
     function* (
       command: Extract<
@@ -77,6 +86,8 @@ const make = Effect.gen(function* () {
         command.type === "thread.create"
           ? command.threadId
           : derive.delegatedTaskThread({ commandId: command.commandId });
+      yield* assertOpen(threadId);
+      if (command.type === "delegated_task.request") yield* assertOpen(command.parentThreadId);
       const child = yield* profiles.getThreadSnapshot(threadId);
       const reservation = yield* admissions.get({ environmentId, threadId });
       if (command.type === "thread.create") {
@@ -140,6 +151,16 @@ const make = Effect.gen(function* () {
     assertCommand,
     assertRemoteAllowed: Effect.fn("AgentProfileDelegation.assertRemoteAllowed")(
       function* (parentThreadId, requestedProfileId) {
+        yield* assertOpen(parentThreadId).pipe(
+          Effect.mapError((cause) =>
+            isFailure(cause)
+              ? cause
+              : new OrchestratorMcpFailure({
+                  code: "orchestration_error",
+                  message: "Cancellation status could not be checked.",
+                }),
+          ),
+        );
         const parent = yield* profiles
           .getThreadSnapshot(parentThreadId)
           .pipe(
@@ -164,6 +185,8 @@ const make = Effect.gen(function* () {
     ),
     prepare: Effect.fn("AgentProfileDelegation.prepare")(
       function* (input) {
+        yield* assertOpen(input.parentThreadId);
+        yield* assertOpen(input.childThreadId);
         const parent = yield* profiles.getThreadSnapshot(input.parentThreadId);
         if (parent === null && input.profileId === undefined && input.writablePaths === undefined)
           return null;
@@ -241,6 +264,9 @@ const make = Effect.gen(function* () {
         const limits = inherited?.limits ?? parent.root.profile.delegation;
         yield* sql.withTransaction(
           Effect.gen(function* () {
+            yield* assertOpen(input.parentThreadId);
+            yield* assertOpen(input.childThreadId);
+            if (inherited !== null) yield* assertOpen(inherited.root.threadId);
             yield* admissions.reserve({
               commandId: input.commandId,
               root: inherited?.root ?? parentRef,

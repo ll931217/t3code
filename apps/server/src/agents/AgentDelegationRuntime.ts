@@ -14,6 +14,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as AgentDelegationStore from "./AgentDelegationStore.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
 
 export class AgentDelegationRuntime extends Context.Service<
   AgentDelegationRuntime,
@@ -28,6 +29,7 @@ export class AgentDelegationRuntime extends Context.Service<
 
 const make = Effect.gen(function* () {
   const store = yield* AgentDelegationStore.AgentDelegationStore;
+  const cancellations = yield* Cancellations.AgentDelegationCancellations;
   const authority = yield* Effect.serviceOption(Authority.AgentDelegationAuthority);
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const outbox = yield* EffectOutbox.EffectOutboxV2;
@@ -42,7 +44,12 @@ const make = Effect.gen(function* () {
       status: "active" | "waiting" | "completed" | "cancelled",
     ) {
       if (reservation.root.environmentId === environmentId) {
-        yield* store.transition(reservation.child, status, true);
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            if (yield* cancellations.requested(reservation.child)) return;
+            yield* store.transition(reservation.child, status, true);
+          }),
+        );
         return;
       }
       if (Option.isSome(authority))
@@ -55,7 +62,11 @@ const make = Effect.gen(function* () {
           );
     });
     for (const reservation of live) {
-      if (reservation.child.environmentId !== environmentId) continue;
+      if (
+        reservation.child.environmentId !== environmentId ||
+        (yield* cancellations.requested(reservation.child))
+      )
+        continue;
       const projection = yield* threads
         .getThreadRecords(reservation.child.threadId, ["runs", "providerTurns"])
         .pipe(Effect.option);
@@ -89,6 +100,7 @@ const make = Effect.gen(function* () {
       (item) => item.child.environmentId === environmentId,
     );
     for (const request of pending) {
+      if (yield* cancellations.requested(request.child)) continue;
       const reservation = yield* store.get(request.child);
       if (reservation?.status === "waiting") yield* transition(reservation, "active");
     }
@@ -97,7 +109,9 @@ const make = Effect.gen(function* () {
         .filter((item) => item.root.environmentId === environmentId)
         .map((item) => [`${item.root.environmentId}:${item.root.threadId}`, item.root]),
     );
-    for (const root of roots.values()) yield* store.admitQueued(root);
+    for (const root of roots.values()) {
+      if (!(yield* cancellations.requested(root))) yield* store.admitQueued(root);
+    }
     if (Option.isSome(authority))
       yield* authority.value.notify.pipe(
         Effect.catchCause((cause) =>
@@ -105,6 +119,7 @@ const make = Effect.gen(function* () {
         ),
       );
     for (const request of pending) {
+      if (yield* cancellations.requested(request.child)) continue;
       const reservation = yield* store.get(request.child);
       if (
         reservation === null ||
@@ -118,6 +133,7 @@ const make = Effect.gen(function* () {
       const id = `agent-admission:${request.child.environmentId}:${request.runId}:${request.generation}`;
       yield* sql.withTransaction(
         Effect.gen(function* () {
+          if (yield* cancellations.requested(request.child)) return;
           yield* outbox.enqueue([
             {
               id,

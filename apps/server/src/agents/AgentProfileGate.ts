@@ -6,6 +6,8 @@ import * as Ref from "effect/Ref";
 
 import * as ProviderTurnStartService from "../orchestration-v2/ProviderTurnStartService.ts";
 import * as AgentProfileStops from "./AgentProfileStops.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
+import * as Identity from "../environment/ServerEnvironment.ts";
 
 export class AgentProfileGate extends Context.Service<
   AgentProfileGate,
@@ -72,12 +74,36 @@ export const layerProviderStart = Layer.effect(
     const base = yield* ProviderTurnStartService.ProviderTurnStartServiceV2;
     const gate = yield* AgentProfileGate;
     const stops = yield* AgentProfileStops.AgentProfileStops;
+    const cancellations = yield* Cancellations.AgentDelegationCancellations;
+    const identity = yield* Identity.ServerEnvironmentIdentity;
+    const environmentId = yield* identity.getEnvironmentId;
     return ProviderTurnStartService.ProviderTurnStartServiceV2.of({
       start: Effect.fn("AgentProfileGate.start")((input) =>
         gate
           .withStart(
             input.threadId,
-            stops.assertSettled(input.threadId).pipe(Effect.andThen(base.start(input))),
+            Effect.gen(function* () {
+              const cancelled = yield* cancellations
+                .requested({ environmentId, threadId: input.threadId })
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderTurnStartService.ProviderTurnStartError({
+                        runId: input.runId,
+                        cause,
+                      }),
+                  ),
+                );
+              if (cancelled)
+                return yield* new ProviderTurnStartService.ProviderTurnStartError({
+                  runId: input.runId,
+                  cause: new Error(
+                    "This execution tree was cancelled. Launch a new profiled thread.",
+                  ),
+                });
+              yield* stops.assertSettled(input.threadId);
+              return yield* base.start(input);
+            }),
           )
           .pipe(
             Effect.catchTags({

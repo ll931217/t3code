@@ -26,6 +26,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as AgentProfiles from "./AgentProfiles.ts";
 import * as AgentDelegationStore from "./AgentDelegationStore.ts";
 import * as GrantStore from "./AgentDelegationAuthorityStore.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
 
 type Reserve = {
   readonly parent: ScopedThreadRef;
@@ -67,7 +68,10 @@ export class AgentDelegationAuthority extends Context.Service<
     readonly reserveFromPeer: (
       input: typeof AgentDelegationReserveInput.Type,
     ) => Effect.Effect<AgentDelegationGrant, OrchestratorMcpFailure>;
-    readonly status: (token: string) => Effect.Effect<AgentDelegationGrant, OrchestratorMcpFailure>;
+    readonly status: (
+      token: string,
+      forCancellation?: boolean,
+    ) => Effect.Effect<AgentDelegationGrant, OrchestratorMcpFailure>;
     readonly transition: (
       input: typeof AgentDelegationStatusInput.Type,
     ) => Effect.Effect<AgentDelegationGrant, OrchestratorMcpFailure>;
@@ -86,6 +90,7 @@ export class AgentDelegationAuthority extends Context.Service<
 
 const make = Effect.gen(function* () {
   const store = yield* AgentDelegationStore.AgentDelegationStore;
+  const cancellations = yield* Cancellations.AgentDelegationCancellations;
   const grants = yield* GrantStore.AgentDelegationAuthorityStore;
   const profiles = yield* AgentProfiles.AgentProfiles;
   const projects = yield* ProjectStore.ProjectStoreV2;
@@ -148,11 +153,29 @@ const make = Effect.gen(function* () {
           success: AgentProfileSnapshot,
         });
   });
-  const status = Effect.fn("AgentDelegationAuthority.status")(function* (token: string) {
+  const cancelled = () =>
+    new OrchestratorMcpFailure({
+      code: "capability_denied",
+      message: "This execution tree was cancelled. Launch a new profiled thread.",
+    });
+  const assertOpen = Effect.fn("AgentDelegationAuthority.assertOpen")(function* (
+    ref: ScopedThreadRef,
+  ) {
+    if (yield* cancellations.requested(ref)) return yield* cancelled();
+  });
+  const status = Effect.fn("AgentDelegationAuthority.status")(function* (
+    token: string,
+    forCancellation = false,
+  ) {
     const grant = yield* grants.byToken(token);
     if (grant === null || grant.reservation.root.environmentId !== here) return yield* denied();
     const reservation = yield* store.get(grant.reservation.child);
     if (reservation === null) return yield* denied();
+    const cancellationRequested =
+      (yield* cancellations.requested(reservation.child)) ||
+      (yield* cancellations.requested(reservation.root));
+    if (forCancellation) return { ...grant, reservation, cancellationRequested };
+    if (cancellationRequested) return yield* cancelled();
     const root = yield* profiles.getThreadSnapshot(reservation.root.threadId);
     if (root === null) return yield* denied();
     yield* profiles.assertSnapshotAllowed(root.id);
@@ -167,6 +190,9 @@ const make = Effect.gen(function* () {
       return yield* denied();
     return yield* sql.withTransaction(
       Effect.gen(function* () {
+        yield* assertOpen(input.parent);
+        yield* assertOpen(parent?.root ?? input.parent);
+        yield* assertOpen(input.child);
         const reservation = yield* store.reserve({
           commandId: input.commandId,
           root: parent?.root ?? input.parent,
@@ -198,6 +224,8 @@ const make = Effect.gen(function* () {
   });
   const reserve = Effect.fn("AgentDelegationAuthority.reserve")(function* (input: Reserve) {
     if (input.parent.environmentId !== here) return yield* denied();
+    yield* assertOpen(input.parent);
+    yield* assertOpen(input.child);
     const parent = yield* store.get(input.parent);
     if (parent !== null && parent.root.environmentId !== here) {
       const inbound = yield* grants.inbound(input.parent);
@@ -230,9 +258,12 @@ const make = Effect.gen(function* () {
   const transition = Effect.fn("AgentDelegationAuthority.transition")(function* (
     input: typeof AgentDelegationStatusInput.Type,
   ) {
-    const grant = yield* status(input.token);
     return yield* sql.withTransaction(
       Effect.gen(function* () {
+        const grant = yield* status(
+          input.token,
+          input.forCancellation === true && input.status === "cancelled",
+        );
         const reservation = yield* store.transition(
           grant.reservation.child,
           input.status,
@@ -274,6 +305,7 @@ const make = Effect.gen(function* () {
     });
     yield* sql.withTransaction(
       Effect.gen(function* () {
+        yield* assertOpen(grant.reservation.child);
         yield* grants.accept(grant, peerSessionId, projectId);
         yield* store.mirror(grant.reservation);
         yield* profiles.pinThread({

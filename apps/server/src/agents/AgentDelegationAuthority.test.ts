@@ -18,6 +18,7 @@ import * as Profiles from "./AgentProfiles.ts";
 import * as Store from "./AgentDelegationStore.ts";
 import * as Grants from "./AgentDelegationAuthorityStore.ts";
 import * as Authority from "./AgentDelegationAuthority.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
 
 const snapshot = Schema.decodeSync(AgentProfileSnapshot)({
   id: "snapshot",
@@ -57,7 +58,7 @@ const child = (id: string) => ({
   threadId: ThreadId.make(id),
 });
 const projectId = ProjectId.make("destination");
-const storage = Layer.mergeAll(Store.layer, Grants.layer).pipe(
+const storage = Layer.mergeAll(Store.layer, Grants.layer, Cancellations.layer).pipe(
   Layer.provideMerge(Sqlite.layerMemory),
   Layer.provide(NodeCrypto.layer),
 );
@@ -148,6 +149,61 @@ it.layer(Authority.layer.pipe(Layer.provideMerge(base)))("AgentDelegationAuthori
           providerSuspended: true,
         });
         assert.strictEqual((yield* authority.status(first.token)).reservation.status, "queued");
+      }),
+  );
+  it.effect(
+    "fences cancelled trees while retaining authority for a physical stop acknowledgement",
+    () =>
+      Effect.gen(function* () {
+        const authority = yield* Authority.AgentDelegationAuthority;
+        const cancellations = yield* Cancellations.AgentDelegationCancellations;
+        const tree = { ...root, threadId: ThreadId.make("cancelled-root") };
+        const input = {
+          parent: tree,
+          child: child("cancelled-child"),
+          projectId,
+          snapshot,
+          commandId: CommandId.make("cancelled-child"),
+          requestKey: "cancelled-child",
+        };
+        const grant = yield* authority.reserve(input);
+        yield* cancellations.request(tree, CommandId.make("stop-tree"));
+        yield* cancellations.request(input.child, CommandId.make("stop-tree"));
+        assert.strictEqual(
+          (yield* authority.status(grant.token).pipe(Effect.flip)).code,
+          "capability_denied",
+        );
+        const proof = yield* authority.status(grant.token, true);
+        assert.strictEqual(proof.cancellationRequested, true);
+        assert.strictEqual(proof.reservation.status, "active");
+        yield* authority
+          .reserve({
+            ...input,
+            child: child("late-child"),
+            commandId: CommandId.make("late-child"),
+            requestKey: "late-child",
+          })
+          .pipe(Effect.flip);
+        yield* authority
+          .transition({ token: grant.token, status: "completed", providerSuspended: true })
+          .pipe(Effect.flip);
+        yield* authority
+          .transition({ token: grant.token, status: "cancelled", providerSuspended: false })
+          .pipe(Effect.flip);
+        assert.strictEqual(
+          (yield* authority.status(grant.token, true)).reservation.status,
+          "active",
+        );
+        yield* authority
+          .transition({ token: grant.token, status: "cancelled", providerSuspended: true })
+          .pipe(Effect.flip);
+        const stopped = yield* authority.transition({
+          token: grant.token,
+          status: "cancelled",
+          providerSuspended: true,
+          forCancellation: true,
+        });
+        assert.strictEqual(stopped.reservation.status, "cancelled");
       }),
   );
   it.effect("rejects a changed launch binding before storing an incoming grant", () =>
