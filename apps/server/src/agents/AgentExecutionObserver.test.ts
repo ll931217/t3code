@@ -4,6 +4,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -15,7 +16,7 @@ const decodeStoredEvent = Schema.decodeEffect(OrchestrationV2StoredEvent);
 const environmentId = EnvironmentId.make("local");
 const testLayer = AgentExecutionObserver.layer.pipe(
   Layer.provideMerge(AgentExecutionStore.layer),
-  Layer.provide(database),
+  Layer.provideMerge(database),
   Layer.provide(Layer.mock(EventSink.EventSinkV2)({})),
   Layer.provide(
     Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
@@ -86,6 +87,10 @@ it.effect("records only observed delivery stages once and invalidates earlier ev
       ["dispatch", "delivered"],
       ["result", "sent"],
       ["result", "delivered"],
+    ]);
+    const sql = yield* SqlClient.SqlClient;
+    expect(yield* sql`SELECT sequence FROM agent_execution_observer WHERE id = 1`).toEqual([
+      { sequence: 2 },
     ]);
     yield* store.update(
       {
