@@ -14,7 +14,9 @@ import * as AgentExecutionStore from "./AgentExecutionStore.ts";
 
 const make = Effect.gen(function* () {
   const digest = yield* Digest.Digest;
-  const communicationId = Effect.fn("AgentExecutionObserver.communicationId")(function* (id: string) {
+  const communicationId = Effect.fn("AgentExecutionObserver.communicationId")(function* (
+    id: string,
+  ) {
     if (id.length <= 128) return id;
     return Hex.encode(yield* digest.digest(Digest.sha256, new TextEncoder().encode(id)));
   });
