@@ -42,6 +42,9 @@ export const AgentDelegationReserveInput = Schema.Struct({
   snapshot: AgentProfileSnapshot,
   requestKey: Identity,
 });
+export const AgentDelegationAcknowledgement = Schema.Struct({
+  acknowledged: Schema.Literal(true),
+});
 export const AgentDelegationTokenInput = Schema.Struct({
   token: Identity,
   forCancellation: Schema.optional(Schema.Boolean),

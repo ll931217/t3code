@@ -1,6 +1,7 @@
 import {
   AGENT_DELEGATION_PEER_TOOLS as names,
   AgentDelegationGrant,
+  AgentDelegationAcknowledgement,
   AgentDelegationReviewInput,
   AgentDelegationReserveInput,
   AgentDelegationTokenInput,
@@ -46,7 +47,7 @@ export const AgentDelegationToolkit = Toolkit.make(
     ...shared,
     description: "Internal peer protocol: request durable subtree cancellation at its authority.",
     parameters: AgentDelegationRequestCancelInput,
-    success: Schema.Void,
+    success: AgentDelegationAcknowledgement,
   })
     .annotate(Tool.Idempotent, true)
     .annotate(McpSchema.EnabledWhen, linkedPeer),
@@ -54,7 +55,7 @@ export const AgentDelegationToolkit = Toolkit.make(
     ...shared,
     description: "Internal peer protocol: stop a delegation and acknowledge cancellation.",
     parameters: AgentDelegationCancelInput,
-    success: Schema.Void,
+    success: AgentDelegationAcknowledgement,
   })
     .annotate(Tool.Idempotent, true)
     .annotate(McpSchema.EnabledWhen, linkedPeer),
@@ -105,7 +106,7 @@ export const AgentDelegationToolkit = Toolkit.make(
       token: AgentDelegationTokenInput.fields.token,
       child: ScopedThreadRef,
     }),
-    success: Schema.Void,
+    success: AgentDelegationAcknowledgement,
   })
     .annotate(Tool.Idempotent, true)
     .annotate(McpSchema.EnabledWhen, linkedPeer),

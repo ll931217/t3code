@@ -1,5 +1,9 @@
 import { assert, it } from "@effect/vitest";
-import { EnvironmentId, OrchestratorMcpFailure } from "@t3tools/contracts";
+import {
+  AgentDelegationAcknowledgement,
+  EnvironmentId,
+  OrchestratorMcpFailure,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -22,12 +26,17 @@ const services = Layer.mergeAll(
   Layer.mock(Authority.AgentDelegationAuthority)({
     status: () => Effect.fail(deniedGrant),
     transition: () => Effect.fail(deniedGrant),
+    refresh: () => Effect.succeed(null),
   }),
-  Layer.mock(Grants.AgentDelegationAuthorityStore)({}),
+  Layer.mock(Grants.AgentDelegationAuthorityStore)({
+    inbound: () => Effect.succeed({ grant: { token: "grant-token" } } as never),
+  }),
   Layer.mock(Launch.AgentDelegationPeerLaunch)({}),
   Layer.mock(Cancellations.AgentDelegationCancellationService)({
-    requestFromPeer: () => Effect.fail(deniedGrant),
-    cancelFromPeer: () => Effect.fail(deniedGrant),
+    requestFromPeer: (input) =>
+      input.commandId === "accepted" ? Effect.void : Effect.fail(deniedGrant),
+    cancelFromPeer: (input) =>
+      input.commandId === "accepted" ? Effect.void : Effect.fail(deniedGrant),
   }),
   Layer.mock(Threads.ThreadManagementService)({}),
 );
@@ -47,6 +56,9 @@ const mcpClient = McpSchema.McpServerClient.of({
   },
   getClient: Effect.die("unused"),
 });
+const decodeAcknowledgement = Schema.decodeEffect(
+  Schema.fromJsonString(AgentDelegationAcknowledgement),
+);
 const decode = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ code: Schema.String, message: Schema.String })),
 );
@@ -65,6 +77,21 @@ it.effect(
           capabilities: new Set(["orchestration"]),
           issuedAt: 0,
         };
+        if (access === "full-access") {
+          const response = yield* mcp
+            .callTool({
+              name: "agent_delegation_admit",
+              arguments: {
+                token: "grant-token",
+                child: { environmentId: "destination", threadId: "child" },
+              },
+            })
+            .pipe(Effect.provideService(Invocation.McpInvocationContext, scope));
+          const text = response.content
+            .map((part) => (part.type === "text" ? part.text : ""))
+            .join("");
+          assert.deepEqual(yield* decodeAcknowledgement(text), { acknowledged: true });
+        }
         for (const [name, input] of Object.entries({
           agent_delegation_status: { token: "grant-token", forCancellation: true },
           agent_delegation_transition: {
@@ -130,6 +157,18 @@ it.effect(
           if (access === "read-only" && name !== "agent_delegation_status")
             assert.equal(outcome.code, "capability_denied");
           else assert.deepEqual(outcome, { code: deniedGrant.code, message: deniedGrant.message });
+          if (
+            access === "full-access" &&
+            (name === "agent_delegation_request_cancel" || name === "agent_delegation_cancel")
+          ) {
+            const acknowledged = yield* mcp
+              .callTool({ name, arguments: { ...input, commandId: "accepted" } })
+              .pipe(Effect.provideService(Invocation.McpInvocationContext, scope));
+            const text = acknowledged.content
+              .map((part) => (part.type === "text" ? part.text : ""))
+              .join("");
+            assert.deepEqual(yield* decodeAcknowledgement(text), { acknowledged: true });
+          }
         }
       }
     }).pipe(Effect.provideService(McpSchema.McpServerClient, mcpClient), Effect.provide(server)),

@@ -1,6 +1,7 @@
 import {
   AGENT_DELEGATION_PEER_TOOLS as names,
   AgentDelegationGrant,
+  AgentDelegationAcknowledgement,
   type AgentDelegationCancelInput,
   type AgentDelegationRequestCancelInput,
   type CommandId,
@@ -197,7 +198,7 @@ export const layer = Layer.effect(
               tool: names.requestCancel,
               arguments: { token: inbound.grant.token, commandId: request.commandId },
               limits,
-              success: Schema.Void,
+              success: AgentDelegationAcknowledgement,
             });
             const closed = yield* peers.call({
               environmentId: reservation.root.environmentId,
@@ -230,7 +231,7 @@ export const layer = Layer.effect(
             tool: names.cancel,
             arguments: { grant, commandId: request.commandId },
             limits,
-            success: Schema.Void,
+            success: AgentDelegationAcknowledgement,
           });
           yield* admissions.transition(request.child, "cancelled", true);
         }

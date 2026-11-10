@@ -86,6 +86,7 @@ export const layer = Access.toLayer(AgentDelegationToolkit, {
             message: "The delegation grant is not recognized.",
           });
         yield* (yield* Authority.AgentDelegationAuthority).refresh(input.child);
+        return { acknowledged: true as const };
       }),
     { linkedCallers: "allowed" },
   ),
@@ -97,6 +98,7 @@ export const layer = Access.toLayer(AgentDelegationToolkit, {
           input,
           caller,
         );
+        return { acknowledged: true as const };
       }),
     { linkedCallers: "allowed" },
   ),
@@ -108,6 +110,7 @@ export const layer = Access.toLayer(AgentDelegationToolkit, {
           input,
           caller,
         );
+        return { acknowledged: true as const };
       }),
     { linkedCallers: "allowed" },
   ),
