@@ -16,65 +16,73 @@ const peer = Effect.gen(function* () {
   return scope.client;
 });
 export const layer = Access.toLayer(AgentDelegationToolkit, {
-  agent_delegation_review: Access.readsAsCaller((input) =>
+  agent_delegation_review: Access.reads((input) =>
     Effect.gen(function* () {
       yield* peer;
       return yield* (yield* Authority.AgentDelegationAuthority).review(input);
     }),
   ),
-  agent_delegation_reserve: Access.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      yield* peer;
-      return yield* (yield* Authority.AgentDelegationAuthority).reserveFromPeer(input);
-    }),
+  agent_delegation_reserve: Access.writes(
+    (input) =>
+      Effect.gen(function* () {
+        yield* peer;
+        return yield* (yield* Authority.AgentDelegationAuthority).reserveFromPeer(input);
+      }),
+    { linkedCallers: "allowed" },
   ),
-  agent_delegation_status: Access.readsAsCaller((input) =>
+  agent_delegation_status: Access.reads((input) =>
     Effect.gen(function* () {
       yield* peer;
       return yield* (yield* Authority.AgentDelegationAuthority).status(input.token);
     }),
   ),
-  agent_delegation_transition: Access.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      yield* peer;
-      return yield* (yield* Authority.AgentDelegationAuthority).transition(input);
-    }),
+  agent_delegation_transition: Access.writes(
+    (input) =>
+      Effect.gen(function* () {
+        yield* peer;
+        return yield* (yield* Authority.AgentDelegationAuthority).transition(input);
+      }),
+    { linkedCallers: "allowed" },
   ),
-  agent_delegation_launch: Access.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      const caller = yield* peer;
-      const launched = yield* (yield* PeerLaunch.AgentDelegationPeerLaunch).launch(input, caller);
-      const run = launched.projection.runs.find(
-        (item) => item.userMessageId === MessageId.make(`${input.commandId}:message`),
-      );
-      return {
-        threadId: launched.threadId,
-        projectId: input.projectId,
-        modelSelection: launched.projection.thread.modelSelection,
-        runId: run?.id ?? null,
-        status: run?.status ?? null,
-      };
-    }),
+  agent_delegation_launch: Access.writes(
+    (input) =>
+      Effect.gen(function* () {
+        const caller = yield* peer;
+        const launched = yield* (yield* PeerLaunch.AgentDelegationPeerLaunch).launch(input, caller);
+        const run = launched.projection.runs.find(
+          (item) => item.userMessageId === MessageId.make(`${input.commandId}:message`),
+        );
+        return {
+          threadId: launched.threadId,
+          projectId: input.projectId,
+          modelSelection: launched.projection.thread.modelSelection,
+          runId: run?.id ?? null,
+          status: run?.status ?? null,
+        };
+      }),
+    { linkedCallers: "allowed" },
   ),
-  agent_delegation_admit: Access.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      yield* peer;
-      const grants = yield* GrantStore.AgentDelegationAuthorityStore;
-      const inbound = yield* grants.inbound(input.child).pipe(
-        Effect.mapError(
-          () =>
-            new OrchestratorMcpFailure({
-              code: "orchestration_error",
-              message: "Delegation state unavailable.",
-            }),
-        ),
-      );
-      if (inbound === null || inbound.grant.token !== input.token)
-        return yield* new OrchestratorMcpFailure({
-          code: "capability_denied",
-          message: "The delegation grant is not recognized.",
-        });
-      yield* (yield* Authority.AgentDelegationAuthority).refresh(input.child);
-    }),
+  agent_delegation_admit: Access.writes(
+    (input) =>
+      Effect.gen(function* () {
+        yield* peer;
+        const grants = yield* GrantStore.AgentDelegationAuthorityStore;
+        const inbound = yield* grants.inbound(input.child).pipe(
+          Effect.mapError(
+            () =>
+              new OrchestratorMcpFailure({
+                code: "orchestration_error",
+                message: "Delegation state unavailable.",
+              }),
+          ),
+        );
+        if (inbound === null || inbound.grant.token !== input.token)
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message: "The delegation grant is not recognized.",
+          });
+        yield* (yield* Authority.AgentDelegationAuthority).refresh(input.child);
+      }),
+    { linkedCallers: "allowed" },
   ),
 });
