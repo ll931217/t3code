@@ -618,7 +618,8 @@ const make = Effect.gen(function* () {
         );
       if (result === null) return null;
       if (result.exitCode === 0 || result.exitCode === allowedExitCode) return result;
-      if (result.stderr.toLowerCase().includes("not a git repository")) return null;
+      if (/not a git repository|gitfile does not point to a valid repository/i.test(result.stderr))
+        return null;
       return yield* failure(
         result.stderr.trim().split(/\r?\n/)[0]?.slice(0, 1000) || "command failed",
       );
@@ -814,6 +815,17 @@ const make = Effect.gen(function* () {
       });
   });
 
+  const retainedProfileWorktree = Effect.fn("StorageCleanup.retainedProfileWorktree")(function* (
+    worktreePath: string,
+  ) {
+    const rows = yield* sql<{ retained: number }>`
+      SELECT 1 AS retained FROM agent_profile_threads p
+      JOIN orchestration_v2_projection_threads t ON t.thread_id = p.thread_id
+      WHERE json_extract(t.payload_json, '$.worktreePath') = ${worktreePath} LIMIT 1
+    `.pipe(NodeSqliteClient.readOnly);
+    return rows.length > 0;
+  });
+
   const cleanWorktrees = Effect.fn("StorageCleanup.cleanWorktrees")(function* (
     serverSettings: ServerSettings,
     now: number,
@@ -926,6 +938,8 @@ const make = Effect.gen(function* () {
       };
       yield* Effect.gen(function* () {
         if (!(yield* fs.exists(worktreePath))) return;
+        if (yield* retainedProfileWorktree(worktreePath))
+          return keep("retained agent profile worktree");
         if (deleted && !settings.worktreeOnDelete) return keep("no rules apply");
         if (members.length > 1 && worktreeOwner(members) === undefined)
           return keep(`shared by ${members.length} threads`);
@@ -1088,6 +1102,8 @@ const make = Effect.gen(function* () {
         if (!eligible) return keep(notDueReason);
         // Re-read this path's threads and sessions so new activity cancels removal; full per-worktree snapshots take seconds.
         const blockedSinceCheck = Effect.fnUntraced(function* () {
+          if (yield* retainedProfileWorktree(worktreePath))
+            return "retained agent profile worktree";
           const latestProjects = yield* projectStore.listShells();
           if (yield* containsProjectRoot(worktreePath, [project, ...latestProjects]))
             return "contains a project checkout";
