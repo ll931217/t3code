@@ -83,6 +83,16 @@ import Migration0077 from "./Migrations/077_RepairBooleanSettledOverride.ts";
 import Migration0078 from "./Migrations/078_DropOrchestrationEventCorrelationIndex.ts";
 import Migration0079 from "./Migrations/079_DelegatedRecoveryIndexes.ts";
 import Migration0080 from "./Migrations/080_ScheduledTaskThreadMode.ts";
+import Migration0081 from "./Migrations/081_AgentProfiles.ts";
+import Migration0082 from "./Migrations/082_AgentExecution.ts";
+import Migration0083 from "./Migrations/083_AgentDelegation.ts";
+import Migration0084 from "./Migrations/084_AgentDelegationStarts.ts";
+import Migration0085 from "./Migrations/085_AgentExecutionObserver.ts";
+import Migration0086 from "./Migrations/086_AgentProfileLifecycle.ts";
+import Migration0087 from "./Migrations/087_AgentDelegationAuthority.ts";
+import Migration0088 from "./Migrations/088_AgentProfileStopGenerations.ts";
+import Migration0089 from "./Migrations/089_AgentDelegationStartGenerations.ts";
+import Migration0090 from "./Migrations/090_AgentDelegationNotificationGenerations.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -166,6 +176,16 @@ const migrationEntries = [
   [78, "DropOrchestrationEventCorrelationIndex", Migration0078],
   [79, "DelegatedRecoveryIndexes", Migration0079],
   [80, "ScheduledTaskThreadMode", Migration0080],
+  [81, "AgentProfiles", Migration0081],
+  [82, "AgentExecution", Migration0082],
+  [83, "AgentDelegation", Migration0083],
+  [84, "AgentDelegationStarts", Migration0084],
+  [85, "AgentExecutionObserver", Migration0085],
+  [86, "AgentProfileLifecycle", Migration0086],
+  [87, "AgentDelegationAuthority", Migration0087],
+  [88, "AgentProfileStopGenerations", Migration0088],
+  [89, "AgentDelegationStartGenerations", Migration0089],
+  [90, "AgentDelegationNotificationGenerations", Migration0090],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
