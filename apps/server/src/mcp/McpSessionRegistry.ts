@@ -10,6 +10,7 @@ import { HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as AgentProfiles from "../agents/AgentProfiles.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 
@@ -211,6 +212,31 @@ const make = Effect.acquireRelease(
 );
 
 export const layer = Layer.effect(McpSessionRegistry, make);
+
+export const layerEnforcingProfiles = Layer.effect(
+  McpSessionRegistry,
+  Effect.gen(function* () {
+    const registry = yield* McpSessionRegistry;
+    const profiles = yield* AgentProfiles.AgentProfiles;
+    return McpSessionRegistry.of({
+      ...registry,
+      resolve: Effect.fn("McpSessionRegistry.resolveProfile")(
+        function* (rawToken) {
+          const scope = yield* registry.resolve(rawToken);
+          if (scope === undefined) return undefined;
+          const snapshot = yield* profiles.getThreadSnapshot(scope.thread.threadId);
+          if (snapshot === null) return scope;
+          yield* profiles.assertSnapshotAllowed(snapshot.id);
+          return {
+            ...scope,
+            thread: { ...scope.thread, allowedTools: snapshot.root.profile.permissions.mcpTools },
+          };
+        },
+        Effect.orElseSucceed(() => undefined),
+      ),
+    });
+  }),
+);
 
 export const touchActiveMcpThread = (threadId: ThreadId): Effect.Effect<void> =>
   activeMcpSessionRegistry ? activeMcpSessionRegistry.touch(threadId) : Effect.void;

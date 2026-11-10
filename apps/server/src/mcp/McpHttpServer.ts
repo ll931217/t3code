@@ -44,6 +44,10 @@ import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
+import { AgentExecutionToolkit } from "./toolkits/agentExecution/tools.ts";
+import * as AgentExecutionHandlers from "./toolkits/agentExecution/handlers.ts";
+import { AgentDelegationToolkit } from "./toolkits/agentDelegation/tools.ts";
+import * as AgentDelegationHandlers from "./toolkits/agentDelegation/handlers.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
 import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
@@ -1056,7 +1060,24 @@ const withToolSpans = Effect.fn("McpHttpServer.withToolSpans")(function* <A, E, 
                 "mcp.tool.name": name,
               },
             },
-            () => options.handle(payload),
+            () =>
+              Effect.gen(function* () {
+                const invocation = yield* Effect.serviceOption(
+                  McpInvocationContext.McpInvocationContext,
+                );
+                const allowedTools = Option.isSome(invocation)
+                  ? invocation.value.thread?.allowedTools
+                  : undefined;
+                if (allowedTools !== undefined && !allowedTools.includes(name)) {
+                  return new McpSchema.CallToolResult({
+                    isError: true,
+                    content: [
+                      { type: "text", text: "This agent profile does not allow this tool." },
+                    ],
+                  });
+                }
+                return yield* options.handle(payload);
+              }),
           ),
       });
     }),
@@ -1238,6 +1259,8 @@ export const layerMcpTransport = <RA, RE, RR>(registrations: Layer.Layer<RA, RE,
 
 /** Every tool the T3 MCP server advertises. AgentContextBudget.test.ts measures this set. */
 export const layerTools = Layer.mergeAll(
+  toolkitRegistration(AgentDelegationToolkit, AgentDelegationHandlers.layer),
+  toolkitRegistration(AgentExecutionToolkit, AgentExecutionHandlers.layer),
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,

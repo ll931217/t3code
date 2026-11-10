@@ -175,6 +175,23 @@ const callTool = (name: string, args: Record<string, unknown>) =>
 
 const callSnapshot = (args: Record<string, unknown>) => callTool("preview_snapshot", args);
 
+it.effect("refuses tools outside a profile allowlist before executing them", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server.callTool({ name: "preview_snapshot", arguments: {} }).pipe(
+      Effect.provideService(McpInvocationContext.McpInvocationContext, {
+        ...invocation,
+        thread: { ...invocation.thread, allowedTools: ["preview_status"] },
+      }),
+      Effect.provideService(McpSchema.McpServerClient, client),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      { type: "text", text: "This agent profile does not allow this tool." },
+    ]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect.each([
   { input: {}, open: false, message: "No device is open in this thread. Call device_open first." },
   {
