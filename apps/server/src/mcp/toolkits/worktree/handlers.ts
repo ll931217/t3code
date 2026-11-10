@@ -7,9 +7,24 @@ import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as WorktreeMcpService from "../../WorktreeMcpService.ts";
+import * as AgentWorktreeActions from "../../../agents/AgentWorktreeActions.ts";
 import { WorktreeToolkit } from "./tools.ts";
 
 const handlers = {
+  agent_worktree_action: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      if (scope.thread === undefined || !scope.capabilities.has("worktree"))
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "This operation requires an agent thread with worktree access.",
+        });
+      return yield* (yield* AgentWorktreeActions.AgentWorktreeActions).run(
+        scope.thread.threadId,
+        input.operation,
+      );
+    }),
+  ),
   t3_worktree_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const context = yield* McpInvocationContext.McpInvocationContext;

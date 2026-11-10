@@ -1,4 +1,7 @@
 import {
+  AgentWorktreeActionInput,
+  AgentWorktreeActionResult,
+  AgentWorktreeActionError,
   WorktreeMcpFailure,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
@@ -16,6 +19,7 @@ import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as WorktreeMcpService from "../../WorktreeMcpService.ts";
+import * as AgentWorktreeActions from "../../../agents/AgentWorktreeActions.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -82,7 +86,25 @@ const WorktreeListTool = Tool.make("t3_worktree_list", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
+const AgentWorktreeActionTool = Tool.make("agent_worktree_action", {
+  description:
+    "Explicitly commit selected paths, publish this thread's branch to origin, or fast-forward merge a completed sibling/child worktree into THIS thread's workspace. Requires a writable profile and the matching integration permission; read-only coordinators must delegate. Merge requires clean worktrees in the same execution tree and project. Keeps the source worktree; cleanup is a separate user action.",
+  parameters: Schema.Struct({ operation: AgentWorktreeActionInput }),
+  success: AgentWorktreeActionResult,
+  failure: Schema.Union([AgentWorktreeActionError, OrchestratorMcpFailure]),
+  failureMode: "return",
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+    AgentWorktreeActions.AgentWorktreeActions,
+  ],
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.OpenWorld, true);
+
 export const WorktreeToolkit = Toolkit.make(
+  AgentWorktreeActionTool,
   WorktreeHandoffTool,
   WorktreeStatusTool,
   WorktreeListTool,
