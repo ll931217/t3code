@@ -871,6 +871,8 @@ const DedupedBodyMarker = Schema.optionalKey(Schema.Literal(true));
  * as there. Such a task has no `childThreadId`.
  */
 export const OrchestrationV2RemoteTaskChild = Schema.Struct({
+  /** Managed launch intents exist before the destination acknowledges its thread. */
+  managed: Schema.optional(Schema.Boolean),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   label: Schema.String,

@@ -337,36 +337,80 @@ const make = Effect.gen(function* () {
               ),
           ),
         });
-        return yield* peerClient.value.call({
-          environmentId: target.environmentId,
-          tool: AGENT_DELEGATION_PEER_TOOLS.launch,
-          arguments: { grant, projectId, task, title, commandId },
-          limits: {
-            runtimeMode: runtimeMode ?? parent.thread.runtimeMode,
-            interactionMode: interactionMode ?? parent.thread.interactionMode,
-          },
-          success: ProjectToolkit.tools.t3_thread_launch.successSchema,
-        });
-      });
-      const launched = yield* pinned !== null ||
-      input.profileId !== undefined ||
-      input.writablePaths !== undefined
-        ? managedLaunch
-        : forwarding.call(scope, ProjectToolkit.tools.t3_thread_launch, target.environmentId, {
-            projectId,
-            title,
-            modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
-            ...(runtimeMode === undefined ? {} : { runtimeMode }),
-            ...(interactionMode === undefined ? {} : { interactionMode }),
-            message: task,
-            clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
-            // The thread there shows it is this thread's subagent, with a way back.
-            delegatedFrom: {
-              environmentId: hereId,
-              threadId: parent.thread.id,
-              title: parent.thread.title,
+        const remoteChild: OrchestrationV2RemoteTaskChild = {
+          ...grant.reservation.child,
+          managed: true,
+          label: target.environmentId,
+          title,
+          runId: derive.run({ threadId: grant.reservation.child.threadId, ordinal: 1 }),
+        };
+        yield* threads
+          .dispatch({
+            type: "delegated_task.remote.request",
+            commandId,
+            parentThreadId: scope.thread.threadId,
+            parentRunId: parentRun.id,
+            parentNodeId,
+            task,
+            ...(input.title === undefined ? {} : { title: input.title }),
+            driver: ProviderDriverKind.make("remote"),
+            modelSelection: snapshot.root.profile.modelSelection,
+            remoteChild,
+            completionWake: input.mode === "wait" ? "settled_only" : "always",
+          })
+          .pipe(
+            Effect.mapError(
+              () =>
+                new OrchestratorMcpFailure({
+                  code: "orchestration_error",
+                  message: "Unable to record the delegated task.",
+                }),
+            ),
+          );
+        const taskId = derive.delegatedTaskNode({ commandId });
+        yield* peerClient.value
+          .call({
+            environmentId: target.environmentId,
+            tool: AGENT_DELEGATION_PEER_TOOLS.launch,
+            arguments: { grant, projectId, task, title, commandId },
+            limits: {
+              runtimeMode: runtimeMode ?? parent.thread.runtimeMode,
+              interactionMode: interactionMode ?? parent.thread.interactionMode,
             },
-          });
+            success: ProjectToolkit.tools.t3_thread_launch.successSchema,
+          })
+          .pipe(
+            Effect.ensuring(
+              followOne(scope.thread.threadId, taskId).pipe(
+                Effect.forkIn(followers),
+                Effect.asVoid,
+              ),
+            ),
+          );
+        return { taskId };
+      });
+      if (pinned !== null || input.profileId !== undefined || input.writablePaths !== undefined)
+        return yield* managedLaunch;
+      const launched = yield* forwarding.call(
+        scope,
+        ProjectToolkit.tools.t3_thread_launch,
+        target.environmentId,
+        {
+          projectId,
+          title,
+          modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
+          ...(runtimeMode === undefined ? {} : { runtimeMode }),
+          ...(interactionMode === undefined ? {} : { interactionMode }),
+          message: task,
+          clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
+          // The thread there shows it is this thread's subagent, with a way back.
+          delegatedFrom: {
+            environmentId: hereId,
+            threadId: parent.thread.id,
+            title: parent.thread.title,
+          },
+        },
+      );
       const link = yield* links.get(target.environmentId).pipe(
         Effect.map(Option.getOrUndefined),
         Effect.orElseSucceed(() => undefined),
@@ -583,6 +627,10 @@ const make = Effect.gen(function* () {
    */
   const finalReason = Effect.fn("RemoteDelegation.finalReason")(
     function* (parentThreadId: ThreadId, taskId: NodeId, error: OrchestratorMcpFailure) {
+      if (error.code === "thread_not_found" || error.code === "run_not_found") {
+        const { task } = yield* readTask(parentThreadId, taskId);
+        if (task?.remoteChild?.managed === true && task.result === null) return undefined;
+      }
       if (isFinal(error)) return error.message;
       if (error.code !== "invalid_request") return undefined;
       const { task } = yield* readTask(parentThreadId, taskId);

@@ -3,6 +3,8 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  AgentProfileSnapshot,
+  OrchestratorMcpFailure,
   CommandId,
   EventId,
   MessageId,
@@ -19,6 +21,10 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as Schema from "effect/Schema";
+import * as Profiles from "../agents/AgentProfiles.ts";
+import * as Authority from "../agents/AgentDelegationAuthority.ts";
+import * as PeerClient from "./PeerMcpClient.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -77,6 +83,7 @@ const boxProject = ProjectId.make("project:box");
 const instanceId = ProviderInstanceId.make("codex");
 const driver = ProviderDriverKind.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.4" };
+const decodeProfileSnapshot = Schema.decodeUnknownEffect(AgentProfileSnapshot);
 
 type LaunchedWith = Pick<
   ThreadLaunch.ThreadLaunchInput,
@@ -551,6 +558,11 @@ const makeLaptop = (
   >,
   /** The laptop's links from before a restart, which keep their sessions there. */
   kept?: Context.Context<Layer.Success<ReturnType<typeof layerLinkingEnvironment>>>,
+  managed:
+    | Layer.Layer<
+        Profiles.AgentProfiles | Authority.AgentDelegationAuthority | PeerClient.PeerMcpClient
+      >
+    | Layer.Layer<never> = Layer.empty,
 ) =>
   Effect.gen(function* () {
     const linking = kept ?? (yield* layerLinkingEnvironment(laptop).pipe(Layer.build));
@@ -579,6 +591,7 @@ const makeLaptop = (
       Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
       Layer.provideMerge(
         RemoteDelegation.layer.pipe(
+          Layer.provide(managed),
           Layer.provideMerge(PeerForwarding.layer),
           Layer.provide(
             Layer.mock(ProjectService.ProjectService)({
@@ -639,7 +652,7 @@ const makeLaptop = (
 const parentThreadId = ThreadId.make("thread:laptop-parent");
 const parentRunId = RunId.make("run:laptop-parent");
 const parentRootNode = NodeId.make("node:laptop-parent:root");
-const parentScope: McpInvocationContext.McpInvocationScope = {
+const parentScope: McpInvocationContext.McpThreadInvocationScope = {
   environmentId: laptop.environmentId,
   requestNamespace: "provider-session:laptop-parent",
   thread: {
@@ -803,6 +816,105 @@ const taskResult = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>, ta
           : undefined,
       ),
     );
+
+it.effect("a managed launch with a lost reply remains recorded across retries", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const snapshot = yield* decodeProfileSnapshot({
+        id: "snapshot:remote",
+        dependencies: [],
+        root: {
+          fingerprint: "v1",
+          sourceProjectId: null,
+          profile: {
+            id: "personal/worker",
+            name: "Worker",
+            description: "",
+            prompt: "Work",
+            modelSelection,
+            permissions: {
+              filesystem: "read-only",
+              commands: false,
+              network: false,
+              writablePaths: [],
+              nativeTools: [],
+              mcpTools: [],
+              approvalPolicy: "never",
+              integrations: { commit: false, merge: false, publish: false },
+            },
+            delegation: { profiles: [], maxConcurrent: 1, maxAgents: 2, maxDepth: 2 },
+            isolation: "shared",
+          },
+        },
+      });
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const calls = yield* Queue.unbounded<void>();
+      const managed = Layer.mergeAll(
+        Layer.mock(Profiles.AgentProfiles)({ getThreadSnapshot: () => Effect.succeed(snapshot) }),
+        Layer.mock(Authority.AgentDelegationAuthority)({
+          reviewThere: () => Effect.succeed(snapshot),
+          reserve: (input) =>
+            Effect.succeed({
+              token: "grant",
+              snapshot,
+              reservation: {
+                ...input,
+                root: input.parent,
+                snapshotId: snapshot.id,
+                status: "active",
+                depth: 1,
+                limits: snapshot.root.profile.delegation,
+              },
+            }),
+        }),
+        Layer.mock(PeerClient.PeerMcpClient)({
+          call: () =>
+            Queue.offer(calls, undefined).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new OrchestratorMcpFailure({
+                    code: "orchestration_error",
+                    message: "Launch reply lost.",
+                  }),
+                ),
+              ),
+            ),
+        }),
+      );
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const retry = yield* steppedRetries;
+      const a = yield* makeLaptop(database, offers, undefined, managed).pipe(
+        Effect.provideService(RemoteDelegation.FollowRetrySchedule, retry.schedule),
+      );
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = yield* Effect.flip(
+          a.remote.delegate(parentScope, {
+            task: "Run remotely.",
+            profileId: "personal/worker",
+            mode: "async",
+            clientRequestId: "managed-intent",
+            target: { environmentId: box.environmentId, projectId: boxProject },
+          }),
+        );
+        expect(result.message).toBe("Launch reply lost.");
+        yield* Queue.take(calls);
+        if (attempt === 0) yield* Queue.take(retry.failed);
+        const { subagents } = yield* a.threads.getThreadRecords(parentThreadId, ["subagents"]);
+        expect(subagents).toHaveLength(1);
+        expect(subagents[0]).toMatchObject({
+          result: null,
+          remoteChild: { environmentId: box.environmentId, managed: true },
+        });
+      }
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
 
 it.effect("a task delegated to the box wakes the laptop's parent when it ends there", () =>
   Effect.scoped(
