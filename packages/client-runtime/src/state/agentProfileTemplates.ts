@@ -30,7 +30,9 @@ export function createAgentProfileTemplate(
       mcpTools: [
         "agent_execution_read",
         "agent_execution_update",
-        ...(role === "orchestrator" ? ["delegate_task", "task_status", "task_cancel"] : []),
+        ...(role === "orchestrator"
+          ? ["orchestrator_capabilities", "delegate_task", "task_status", "task_cancel"]
+          : []),
       ],
       approvalPolicy: "never",
       integrations: { commit: false, merge: false, publish: false },
