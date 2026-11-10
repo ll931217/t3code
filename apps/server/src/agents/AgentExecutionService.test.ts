@@ -1,5 +1,11 @@
 import { expect, it } from "@effect/vitest";
-import { CommandId, EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EnvironmentId,
+  OrchestratorMcpFailure,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -8,6 +14,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as AgentExecutionStore from "./AgentExecutionStore.ts";
 import * as AgentExecutionService from "./AgentExecutionService.ts";
+import * as Cancellations from "./AgentDelegationCancellationService.ts";
 
 it.effect(
   "recovers attributed steering independently and keeps node stops separate from subtree cancellation",
@@ -20,6 +27,20 @@ it.effect(
       const delivered = new Map<string, ThreadManagement.ThreadManagementSendInput>();
       const interrupted = new Set<ThreadId>();
       const cancelledSubtrees = new Set<ThreadId>();
+      const stopEvents: string[] = [];
+      let fenceUnavailable = false;
+      const cancellations = Layer.mock(Cancellations.AgentDelegationCancellationService)({
+        requestSubtree: (root) =>
+          Effect.gen(function* () {
+            expect(root.environmentId).toBe("local");
+            if (fenceUnavailable)
+              return yield* new OrchestratorMcpFailure({
+                code: "orchestration_error",
+                message: "Cancellation state unavailable.",
+              });
+            stopEvents.push(`fence:${root.threadId}`);
+          }),
+      });
       const threads = Layer.mock(ThreadManagement.ThreadManagementService)({
         getThreadProjection: (id) => Effect.succeed(idleThreadProjection(liveThreadShell(id))),
         sendToThread: (input) => {
@@ -37,6 +58,7 @@ it.effect(
         },
         interruptThread: ({ threadId }) =>
           Effect.sync(() => {
+            stopEvents.push(`interrupt:${threadId}`);
             interrupted.add(threadId);
             return { type: "no_active_run" as const };
           }),
@@ -101,7 +123,24 @@ it.effect(
           scope: "subtree",
         });
         expect(cancelledSubtrees.has(second)).toBe(true);
-      }).pipe(Effect.provide(AgentExecutionService.layer.pipe(Layer.provide(threads))));
+        expect(stopEvents).toEqual([
+          `interrupt:${first}`,
+          `fence:${second}`,
+          `interrupt:${second}`,
+        ]);
+        fenceUnavailable = true;
+        const failure = yield* service
+          .stop({
+            threadId: first,
+            commandId: CommandId.make("stop-tree-unavailable"),
+            scope: "subtree",
+          })
+          .pipe(Effect.flip);
+        expect(failure.reason).toBe("storage");
+        expect(stopEvents).toHaveLength(3);
+      }).pipe(
+        Effect.provide(AgentExecutionService.layer.pipe(Layer.provide([threads, cancellations]))),
+      );
     }).pipe(
       Effect.provide(
         AgentExecutionStore.layer.pipe(

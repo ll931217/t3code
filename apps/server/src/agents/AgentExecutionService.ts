@@ -23,6 +23,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as AgentExecutionStore from "./AgentExecutionStore.ts";
+import * as Cancellations from "./AgentDelegationCancellationService.ts";
 
 export class AgentExecutionService extends Context.Service<
   AgentExecutionService,
@@ -61,6 +62,7 @@ const mapError = (cause: unknown) =>
 const make = Effect.gen(function* () {
   const store = yield* AgentExecutionStore.AgentExecutionStore;
   const threads = yield* ThreadManagementService.ThreadManagementService;
+  const cancellations = yield* Cancellations.AgentDelegationCancellationService;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const environmentId = yield* identity.getEnvironmentId;
 
@@ -137,6 +139,11 @@ const make = Effect.gen(function* () {
       ),
     history: store.history,
     stop: Effect.fn("AgentExecutionService.stop")(function* (input) {
+      if (input.scope === "subtree")
+        yield* cancellations.requestSubtree(
+          { environmentId, threadId: input.threadId },
+          input.commandId,
+        );
       const projection = yield* threads.getThreadProjection(input.threadId);
       yield* threads.interruptThread({
         projectId: projection.thread.projectId,

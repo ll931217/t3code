@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Authority from "../../../agents/AgentDelegationAuthority.ts";
 import * as GrantStore from "../../../agents/AgentDelegationAuthorityStore.ts";
 import * as PeerLaunch from "../../../agents/AgentDelegationPeerLaunch.ts";
+import * as Cancellations from "../../../agents/AgentDelegationCancellationService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Access from "../../McpToolAccess.ts";
 import { AgentDelegationToolkit } from "./tools.ts";
@@ -33,7 +34,10 @@ export const layer = Access.toLayer(AgentDelegationToolkit, {
   agent_delegation_status: Access.reads((input) =>
     Effect.gen(function* () {
       yield* peer;
-      return yield* (yield* Authority.AgentDelegationAuthority).status(input.token);
+      return yield* (yield* Authority.AgentDelegationAuthority).status(
+        input.token,
+        input.forCancellation ?? false,
+      );
     }),
   ),
   agent_delegation_transition: Access.writes(
@@ -82,6 +86,28 @@ export const layer = Access.toLayer(AgentDelegationToolkit, {
             message: "The delegation grant is not recognized.",
           });
         yield* (yield* Authority.AgentDelegationAuthority).refresh(input.child);
+      }),
+    { linkedCallers: "allowed" },
+  ),
+  agent_delegation_request_cancel: Access.writes(
+    (input) =>
+      Effect.gen(function* () {
+        const caller = yield* peer;
+        yield* (yield* Cancellations.AgentDelegationCancellationService).requestFromPeer(
+          input,
+          caller,
+        );
+      }),
+    { linkedCallers: "allowed" },
+  ),
+  agent_delegation_cancel: Access.writes(
+    (input) =>
+      Effect.gen(function* () {
+        const caller = yield* peer;
+        yield* (yield* Cancellations.AgentDelegationCancellationService).cancelFromPeer(
+          input,
+          caller,
+        );
       }),
     { linkedCallers: "allowed" },
   ),

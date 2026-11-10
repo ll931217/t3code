@@ -6,6 +6,8 @@ import {
   AgentDelegationTokenInput,
   AgentDelegationStatusInput,
   AgentDelegationLaunchInput,
+  AgentDelegationRequestCancelInput,
+  AgentDelegationCancelInput,
   AgentProfileSnapshot,
   ScopedThreadRef,
   OrchestratorMcpFailure,
@@ -18,6 +20,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as Authority from "../../../agents/AgentDelegationAuthority.ts";
 import * as GrantStore from "../../../agents/AgentDelegationAuthorityStore.ts";
 import * as PeerLaunch from "../../../agents/AgentDelegationPeerLaunch.ts";
+import * as Cancellations from "../../../agents/AgentDelegationCancellationService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectToolkit } from "../project/tools.ts";
@@ -33,11 +36,28 @@ const shared = {
     Authority.AgentDelegationAuthority,
     GrantStore.AgentDelegationAuthorityStore,
     PeerLaunch.AgentDelegationPeerLaunch,
+    Cancellations.AgentDelegationCancellationService,
     Invocation.McpInvocationContext,
     Threads.ThreadManagementService,
   ],
 };
 export const AgentDelegationToolkit = Toolkit.make(
+  Tool.make(names.requestCancel, {
+    ...shared,
+    description: "Internal peer protocol: request durable subtree cancellation at its authority.",
+    parameters: AgentDelegationRequestCancelInput,
+    success: Schema.Void,
+  })
+    .annotate(Tool.Idempotent, true)
+    .annotate(McpSchema.EnabledWhen, linkedPeer),
+  Tool.make(names.cancel, {
+    ...shared,
+    description: "Internal peer protocol: stop a delegation and acknowledge cancellation.",
+    parameters: AgentDelegationCancelInput,
+    success: Schema.Void,
+  })
+    .annotate(Tool.Idempotent, true)
+    .annotate(McpSchema.EnabledWhen, linkedPeer),
   Tool.make(names.review, {
     ...shared,
     description: "Internal peer protocol: resolve a reviewed destination profile.",
