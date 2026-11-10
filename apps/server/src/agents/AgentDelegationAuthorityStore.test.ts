@@ -84,6 +84,11 @@ it.layer(
         yield* Effect.gen(function* () {
           const reopened = yield* AuthorityStore.AgentDelegationAuthorityStore;
           assert.deepStrictEqual(yield* reopened.byToken(first.token), first);
+          assert.deepStrictEqual(yield* reopened.byChild(reservation.child), first);
+          assert.strictEqual(
+            yield* reopened.byChild({ ...reservation.child, environmentId: root.environmentId }),
+            null,
+          );
           assert.strictEqual(
             (yield* reopened.inbound(reservation.child))?.grant.token,
             first.token,

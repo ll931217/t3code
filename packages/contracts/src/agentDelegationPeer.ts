@@ -25,6 +25,7 @@ export const AgentDelegationGrant = Schema.Struct({
   reservation: AgentDelegationReservation,
   token: Identity,
   snapshot: AgentProfileSnapshot,
+  cancellationRequested: Schema.optional(Schema.Boolean),
 });
 export type AgentDelegationGrant = typeof AgentDelegationGrant.Type;
 export const AgentDelegationReviewInput = Schema.Struct({
@@ -41,11 +42,25 @@ export const AgentDelegationReserveInput = Schema.Struct({
   snapshot: AgentProfileSnapshot,
   requestKey: Identity,
 });
-export const AgentDelegationTokenInput = Schema.Struct({ token: Identity });
+export const AgentDelegationTokenInput = Schema.Struct({
+  token: Identity,
+  forCancellation: Schema.optional(Schema.Boolean),
+});
+export const AgentDelegationRequestCancelInput = Schema.Struct({
+  token: Identity,
+  commandId: CommandId,
+});
+export type AgentDelegationRequestCancelInput = typeof AgentDelegationRequestCancelInput.Type;
+export const AgentDelegationCancelInput = Schema.Struct({
+  grant: AgentDelegationGrant,
+  commandId: CommandId,
+});
+export type AgentDelegationCancelInput = typeof AgentDelegationCancelInput.Type;
 export const AgentDelegationStatusInput = Schema.Struct({
   token: Identity,
   status: Schema.Literals(["active", "waiting", "completed", "cancelled"]),
   providerSuspended: Schema.Boolean,
+  forCancellation: Schema.optional(Schema.Boolean),
 });
 export const AgentDelegationLaunchInput = Schema.Struct({
   grant: AgentDelegationGrant,
@@ -62,4 +77,6 @@ export const AGENT_DELEGATION_PEER_TOOLS = {
   transition: "agent_delegation_transition",
   launch: "agent_delegation_launch",
   admit: "agent_delegation_admit",
+  requestCancel: "agent_delegation_request_cancel",
+  cancel: "agent_delegation_cancel",
 } as const;

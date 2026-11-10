@@ -35,6 +35,9 @@ export class AgentDelegationAuthorityStore extends Context.Service<
     readonly byToken: (
       token: string,
     ) => Effect.Effect<AgentDelegationGrant | null, AgentDelegationError>;
+    readonly byChild: (
+      child: ScopedThreadRef,
+    ) => Effect.Effect<AgentDelegationGrant | null, AgentDelegationError>;
     readonly accept: (
       grant: AgentDelegationGrant,
       peerSessionId: string,
@@ -71,6 +74,12 @@ const make = Effect.gen(function* () {
   }, Effect.mapError(storageError));
   return AgentDelegationAuthorityStore.of({
     byToken,
+    byChild: Effect.fn("AgentDelegationAuthorityStore.byChild")(function* (child) {
+      const rows = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM agent_delegation_grants WHERE child_key = ${key(child)}`;
+      return rows[0] ? yield* decodeGrant(rows[0].payload_json) : null;
+    }, Effect.mapError(storageError)),
     issue: Effect.fn("AgentDelegationAuthorityStore.issue")(function* (reservation, snapshot) {
       if (reservation.snapshotId !== snapshot.id)
         return yield* new AgentDelegationError({ reason: "invalid-input" });
