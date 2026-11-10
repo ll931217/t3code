@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Bot, ChevronDown, ChevronRight, LocateFixed, Minus, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, LocateFixed, Minus, Plus } from "lucide-react";
 import type {
   AgentCommunication,
   AgentExecutionRecord,
@@ -25,6 +25,7 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { AgentTrafficEdges } from "./AgentTrafficEdges";
 import { AgentVerificationEditor } from "./AgentVerificationEditor";
+import { AgentExecutionNode } from "./AgentExecutionNode";
 
 const FINISHED = new Set(["completed", "failed", "cancelled", "interrupted", "idle"]);
 const NODE_WIDTH = 208;
@@ -367,14 +368,20 @@ export function AgentsPanel(props: {
   const childCounts = new Map<string, number>();
   for (const edge of graph.edges)
     childCounts.set(edge.source, (childCounts.get(edge.source) ?? 0) + 1);
-  const positions = new Map<string, { x: number; y: number }>();
-  for (const [depth, nodes] of levels)
+  const [nodeHeights, setNodeHeights] = useState<ReadonlyMap<string, number>>(new Map());
+  const positions = new Map<string, { x: number; y: number; height: number }>();
+  let graphHeight = 0;
+  for (const [, nodes] of [...levels].sort(([a], [b]) => a - b)) {
     nodes.forEach((node, index) =>
       positions.set(node.key, {
         x: (index - (nodes.length - 1) / 2) * 240 - NODE_WIDTH / 2,
-        y: depth * 144,
+        y: graphHeight,
+        height: nodeHeights.get(node.key) ?? NODE_HEIGHT,
       }),
     );
+    graphHeight += Math.max(...nodes.map((node) => nodeHeights.get(node.key) ?? NODE_HEIGHT)) + 56;
+  }
+  graphHeight = Math.max(1, graphHeight - 56);
   const container = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; view: AgentGraphView; mode: "pan" | "split" } | null>(
@@ -392,23 +399,47 @@ export function AgentsPanel(props: {
         : undefined,
     [],
   );
+  const shownKey = JSON.stringify(shown.map((node) => node.key));
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observe rendered node heights so wrapped objectives cannot overlap later rows
+  useEffect(() => {
+    if (!canvas.current || !props.visible) return;
+    const keys = new Set<string>(JSON.parse(shownKey));
+    const elements = Array.from(
+      canvas.current.querySelectorAll<HTMLButtonElement>("[data-agent-node-key]"),
+    );
+    return observeResize(elements, (entries) => {
+      setNodeHeights((previous) => {
+        const next = new Map([...previous].filter(([key]) => keys.has(key)));
+        let changed = next.size !== previous.size;
+        for (const entry of entries) {
+          const element = entry.target as HTMLButtonElement;
+          const key = element.dataset.agentNodeKey;
+          const height = entry.borderBoxSize[0]?.blockSize ?? element.offsetHeight;
+          if (key && height > 0 && next.get(key) !== height) {
+            next.set(key, height);
+            changed = true;
+          }
+        }
+        return changed ? next : previous;
+      });
+    });
+  }, [shownKey, props.visible]);
   const selectedPosition = positions.get(selected.key);
   const x =
     view.follow && selectedPosition ? -(selectedPosition.x + NODE_WIDTH / 2) * view.zoom : view.x;
   const y =
     view.follow && selectedPosition
-      ? canvasSize.height / 2 - (selectedPosition.y + NODE_HEIGHT / 2) * view.zoom
+      ? canvasSize.height / 2 - (selectedPosition.y + selectedPosition.height / 2) * view.zoom
       : view.y;
   const zoom = (next: number) => saveView({ zoom: Math.max(0.15, Math.min(2, next)) });
   const fit = () => {
     const width = Math.max(1, ...[...levels.values()].map((nodes) => nodes.length)) * 240;
-    const height = (Math.max(0, ...levels.keys()) + 1) * 144;
     saveView({
       x: 0,
       y: 16,
       zoom: Math.max(
         0.15,
-        Math.min(1, (canvasSize.width - 32) / width, (canvasSize.height - 32) / height),
+        Math.min(1, (canvasSize.width - 32) / width, (canvasSize.height - 32) / graphHeight),
       ),
       follow: false,
     });
@@ -537,7 +568,7 @@ export function AgentsPanel(props: {
               return from && to ? (
                 <path
                   key={edge.target}
-                  d={`M${from.x + NODE_WIDTH / 2},${from.y + NODE_HEIGHT} V${from.y + 116} H${to.x + NODE_WIDTH / 2} V${to.y}`}
+                  d={`M${from.x + NODE_WIDTH / 2},${from.y + from.height} V${to.y - 28} H${to.x + NODE_WIDTH / 2} V${to.y}`}
                   fill="none"
                   stroke="var(--color-border)"
                   strokeWidth={1.5}
@@ -554,8 +585,19 @@ export function AgentsPanel(props: {
                 className="absolute"
                 style={{ left: position.x, top: position.y, width: NODE_WIDTH }}
               >
-                <button
-                  type="button"
+                <AgentExecutionNode
+                  title={node.title}
+                  objective={
+                    (node.ref
+                      ? props.executionRecords?.get(scopedThreadKey(node.ref))?.objective
+                      : null) ||
+                    node.objective ||
+                    "Awaiting assignment"
+                  }
+                  status={node.status}
+                  childCount={children}
+                  selected={selected.key === node.key}
+                  data-agent-node-key={node.key}
                   role="treeitem"
                   aria-selected={selected.key === node.key}
                   aria-level={node.depth + 1}
@@ -593,24 +635,7 @@ export function AgentsPanel(props: {
                     }
                   }}
                   onClick={() => saveView({ selectedKey: node.key })}
-                  className={`flex h-22 w-full flex-col gap-1 rounded-lg border p-3 text-left shadow-sm focus-visible:outline-2 focus-visible:outline-ring ${selected.key === node.key ? "border-primary bg-accent" : "border-border bg-background"}`}
-                >
-                  <span className="flex w-full items-center gap-2 text-xs font-medium">
-                    <Bot className="size-3 shrink-0" />
-                    <span className="truncate">{node.title}</span>
-                  </span>
-                  <span className="line-clamp-1 text-xs text-muted-foreground">
-                    {(node.ref
-                      ? props.executionRecords?.get(scopedThreadKey(node.ref))?.objective
-                      : null) ||
-                      node.objective ||
-                      "Awaiting assignment"}
-                  </span>
-                  <span className="text-2xs text-muted-foreground">
-                    {node.status ?? "Unavailable"}
-                    {children ? ` · ${children} children` : ""}
-                  </span>
-                </button>
+                />
                 {children ? (
                   <div className="absolute -bottom-3 left-1/2 -translate-x-1/2">
                     <Button

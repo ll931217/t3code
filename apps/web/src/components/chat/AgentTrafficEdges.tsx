@@ -5,7 +5,7 @@ import type { AgentExecutionGraph } from "@t3tools/client-runtime/state/agent-ex
 
 export function AgentTrafficEdges(props: {
   graph: AgentExecutionGraph;
-  positions: ReadonlyMap<string, { x: number; y: number }>;
+  positions: ReadonlyMap<string, { x: number; y: number; height?: number }>;
   communications: ReadonlyArray<AgentCommunication>;
   liveCommunications: ReadonlyArray<AgentCommunication>;
   visible: boolean;
@@ -25,7 +25,12 @@ export function AgentTrafficEdges(props: {
     props.graph.nodes.flatMap((node) => {
       const point = props.positions.get(node.key);
       return node.ref && point
-        ? [[scopedThreadKey(node.ref), { x: point.x + 104, y: point.y + 44 }] as const]
+        ? [
+            [
+              scopedThreadKey(node.ref),
+              { x: point.x + 104, y: point.y + (point.height ?? 88) / 2 },
+            ] as const,
+          ]
         : [];
     }),
   );
