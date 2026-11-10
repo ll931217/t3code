@@ -1,5 +1,6 @@
 import {
   AGENT_DELEGATION_PEER_TOOLS as names,
+  AgentDelegationAcknowledgement,
   AgentDelegationGrant,
   AgentDelegationReserveInput,
   AgentDelegationReviewInput,
@@ -350,7 +351,7 @@ const make = Effect.gen(function* () {
               tool: names.admit,
               arguments: { token: grant.token, child: grant.reservation.child },
               limits,
-              success: Schema.Void,
+              success: AgentDelegationAcknowledgement,
             });
           yield* grants.markNotified(grant.token, true, original.generation);
         }).pipe(
