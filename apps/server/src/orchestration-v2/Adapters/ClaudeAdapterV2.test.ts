@@ -28,6 +28,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import {
+  AgentProfile,
   ChatAttachmentId,
   type ChatAttachment,
   ChatFileAttachment,
@@ -223,6 +224,8 @@ function makeClaudeTestAppThread(input: {
     deletedAt: null,
   };
 }
+
+const decodeAgentProfile = Schema.decodeEffect(AgentProfile);
 
 function makeClaudeTestTurnInput(input: {
   readonly threadId: ThreadId;
@@ -4557,6 +4560,97 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     );
   });
+
+  it.effect.each(["never", "on-request"] as const)(
+    "keeps profile path checks authoritative with %s approvals",
+    (approvalPolicy) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* fs.makeTempDirectoryScoped();
+        yield* fs.makeDirectory(`${cwd}/src`);
+        const harness = yield* makeWakeHarness;
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("profile-approval"),
+          text: "Implement the assigned file.",
+          attachments: [],
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            cwd,
+          }),
+        });
+        const profile = yield* decodeAgentProfile({
+          id: "personal/worker",
+          name: "Worker",
+          description: "Scoped worker",
+          prompt: "Implement the task.",
+          modelSelection: input.modelSelection,
+          permissions: {
+            filesystem: "workspace-write",
+            commands: false,
+            network: false,
+            writablePaths: ["src"],
+            nativeTools: ["Read", "Write"],
+            mcpTools: [],
+            approvalPolicy,
+            integrations: { commit: false, merge: false, publish: false },
+          },
+          delegation: { profiles: [], maxConcurrent: 4, maxAgents: 16, maxDepth: 3 },
+          isolation: "worktree",
+        });
+        yield* harness.runtime.startTurn({
+          ...input,
+          runtimePolicy: { ...input.runtimePolicy, agentProfile: profile, approvalPolicy },
+        });
+        const canUseTool = harness.getOpenedOptions()!.canUseTool!;
+        const decision = yield* Effect.promise(() =>
+          canUseTool(
+            "Write",
+            { file_path: `${cwd}/src/file.ts`, content: "test" },
+            {
+              signal: new AbortController().signal,
+              toolUseID: "profile-write",
+              requestId: "profile-write-request",
+            },
+          ),
+        ).pipe(Effect.forkScoped);
+        if (approvalPolicy === "on-request") {
+          const request = yield* Queue.take(harness.runtimeRequestReceipts);
+          yield* harness.runtime.respondToRuntimeRequest({
+            requestId: request.runtimeRequest.id,
+            decision: "acceptForSession",
+          });
+        }
+        const result = yield* Fiber.join(decision);
+        assert.equal(result?.behavior, "allow");
+        assert.notProperty(result, "updatedPermissions");
+        const denied = yield* Effect.promise(() =>
+          canUseTool(
+            "Write",
+            { file_path: `${cwd}/outside.ts`, content: "test" },
+            {
+              signal: new AbortController().signal,
+              toolUseID: "profile-outside",
+              requestId: "profile-outside-request",
+            },
+          ),
+        );
+        assert.equal(denied?.behavior, "deny");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
 
   describe("Plan-mode tool approval", () => {
     const openPlanTurn = Effect.fn("openPlanTurn")(function* (

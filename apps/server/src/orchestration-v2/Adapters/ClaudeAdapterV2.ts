@@ -1,5 +1,15 @@
 import * as DocumentText from "../../provider/DocumentText.ts";
 import {
+  agentProfileAllowsClaudeTool,
+  claudeAgentProfileOptions,
+} from "../../agents/claudeAgentProfile.ts";
+import {
+  assertAgentProfileCompatible,
+  claudeAgentProfileTools,
+} from "../../agents/agentProfilePolicy.ts";
+import { AgentProfileError, type AgentProfile } from "@t3tools/contracts";
+import { stableStringify } from "@t3tools/shared/relaySigning";
+import {
   compactDynamicToolOutput,
   mcpToolResultOutput,
   toolOutputImages,
@@ -1751,6 +1761,8 @@ const subagentDeviceInstructions: HookCallback = () =>
   });
 
 export function makeClaudeQueryOptions(input: {
+  readonly agentProfile?: AgentProfile;
+  readonly projectInstructions?: string;
   readonly modelSelection: ModelSelection;
   readonly modelCatalog?: ClaudeModelCatalog;
   readonly nativeThreadId: string;
@@ -1896,6 +1908,9 @@ export function makeClaudeQueryOptions(input: {
                 ? `\n${T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH}\n`
                 : "")),
         ...launchAppendSystemPrompt,
+        ...(input.agentProfile === undefined
+          ? []
+          : [input.projectInstructions ?? "", input.agentProfile.prompt]),
       ].join("\n\n"),
     },
     ...(deviceInstructions
@@ -1910,7 +1925,18 @@ export function makeClaudeQueryOptions(input: {
   ];
   const withDirectories =
     additionalDirectories.length === 0 ? options : { ...options, additionalDirectories };
-  return input.cwd === null ? withDirectories : { ...withDirectories, cwd: input.cwd };
+  const result = input.cwd === null ? withDirectories : { ...withDirectories, cwd: input.cwd };
+  if (input.agentProfile === undefined) return result;
+  return {
+    ...result,
+    ...claudeAgentProfileOptions(input.agentProfile, input.cwd ?? "."),
+    tools: [...claudeAgentProfileTools(input.agentProfile)],
+    permissionMode: "default",
+    settings: { ...compiledSelection.settings, disableAllHooks: true },
+    extraArgs: {},
+    hooks: {},
+    additionalDirectories: input.cwd === null ? [] : [input.cwd],
+  };
 }
 
 /**
@@ -2872,6 +2898,12 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   availability: ClaudeBypassAvailability = CLAUDE_BYPASS_FULLY_AVAILABLE,
 ): ClaudeRuntimeQueryPolicy {
+  if (runtimePolicy.agentProfile !== undefined)
+    return {
+      permissionMode: "default",
+      tools: claudeAgentProfileTools(runtimePolicy.agentProfile),
+      installPermissionCallback: true,
+    };
   const requestedMode = permissionModeForClaudeRuntimePolicy(runtimePolicy);
   const downgraded = requestedMode === "bypassPermissions" && availability.bypassDisabled;
   const permissionMode = downgraded
@@ -3006,6 +3038,8 @@ function claudeBypassAvailability(
 }
 
 function requiresClaudeApproval(context: ActiveClaudeTurnContext): boolean {
+  if (context.input.runtimePolicy.agentProfile !== undefined)
+    return context.input.runtimePolicy.agentProfile.permissions.approvalPolicy !== "never";
   // CLI-forwarded requests need a person's decision even under bypass (ask rules,
   // safety checks, or settings fallback). Do not wait for queued init/status updates.
   const policy = context.queryPolicy;
@@ -10327,6 +10361,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
 
           const nativeRequestId = callbackOptions.toolUseID;
+          const profile = context.input.runtimePolicy.agentProfile;
+          if (
+            profile !== undefined &&
+            !(yield* agentProfileAllowsClaudeTool(
+              profile,
+              context.input.runtimePolicy.cwd,
+              toolName,
+              toolInput,
+            ).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            ))
+          )
+            return {
+              behavior: "deny",
+              message: "The agent profile does not permit this tool or path.",
+              toolUseID: nativeRequestId,
+            } satisfies PermissionResult;
           const nativeToolInput = claudeNativeToolInputFromRecord(toolInput);
           const heldForEcho = context.heldRootFrames.length > 0;
           const startToolCall = toolName !== "Agent" && options?.startToolCall !== false;
@@ -10567,6 +10619,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           return permissionResultFromDecision({
             toolName,
             ...resolvedDecision,
+            decision:
+              profile !== undefined && resolvedDecision.decision === "acceptForSession"
+                ? "accept"
+                : resolvedDecision.decision,
             toolInput,
             toolUseID: callbackOptions.toolUseID,
             managedCeiling: context.input.runtimePolicy.maxRuntimeMode !== undefined,
@@ -10824,6 +10880,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
           nativeThreadId: string,
         ) {
+          const agentProfile = turnInput.runtimePolicy.agentProfile;
+          if (agentProfile !== undefined) {
+            yield* assertAgentProfileCompatible(agentProfile, CLAUDE_PROVIDER);
+            if (adapterOptions.settings.launchArgs.trim() !== "")
+              return yield* new AgentProfileError({
+                reason: "unsupported",
+                profileId: agentProfile.id,
+              });
+          }
           const queryPolicy = yield* queryPolicyForTurn(turnInput);
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
@@ -10834,7 +10899,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          const queryPolicyKey =
+            claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides) +
+            (agentProfile === undefined ? "" : stableStringify(agentProfile));
           const compiledSelection = compileClaudeModelSelection(
             turnInput.modelSelection,
             modelCatalog,
@@ -10952,6 +11019,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             launchArgSettings,
           );
           const queryOptions = makeClaudeQueryOptions({
+            ...(agentProfile === undefined
+              ? {}
+              : {
+                  agentProfile,
+                  projectInstructions: (yield* Effect.forEach(["AGENTS.md", "CLAUDE.md"], (name) =>
+                    fileSystem
+                      .readFileString(path.join(turnInput.runtimePolicy.cwd ?? ".", name))
+                      .pipe(
+                        Effect.catchTags({
+                          PlatformError: (error) =>
+                            error.reason._tag === "NotFound"
+                              ? Effect.succeed("")
+                              : Effect.fail(error),
+                        }),
+                      ),
+                  )).join("\n\n"),
+                }),
             modelSelection: turnInput.modelSelection,
             modelCatalog,
             nativeThreadId,

@@ -7,6 +7,7 @@ import {
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  AgentProfile,
   CommandId,
   CheckpointId,
   CodexSettings,
@@ -1230,6 +1231,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     return { notify: PubSub.publish(changes, undefined), until };
   });
 
+  const decodeAgentProfile = Schema.decodeUnknownEffect(AgentProfile);
   const makeCodexReplayHarness = (
     transcript: CodexReplay.CodexAppServerReplayTranscript,
     onEvent: (event: ProviderAdapter.ProviderAdapterV2Event) => Effect.Effect<unknown> = () =>
@@ -1239,6 +1241,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     beforeEmitInbound?: CodexReplay.CodexAppServerReplayDriver["beforeEmitInbound"],
     onUsageLimits?: CodexAdapterV2.CodexAdapterV2Options["onUsageLimits"],
     promptSuggestions: Effect.Effect<boolean> = Effect.succeed(false),
+    runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy = CODEX_TEST_RUNTIME_POLICY,
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1313,13 +1316,13 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         threadId,
         providerSessionId: ProviderSessionId.make(`provider-session-${transcript.scenario}`),
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        runtimePolicy,
         promptSuggestions,
       });
       const providerThread = yield* runtime.ensureThread({
         threadId,
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        runtimePolicy,
       });
       const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
       const firstTerminal = yield* Deferred.make<void>();
@@ -1647,6 +1650,139 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           },
         },
       ]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect("isolates profiled threads from inherited MCP and native delegation", () =>
+    Effect.gen(function* () {
+      const profile = yield* decodeAgentProfile({
+        id: "personal/reviewer",
+        name: "Reviewer",
+        description: "",
+        prompt: "Review only.",
+        modelSelection: CODEX_TEST_MODEL_SELECTION,
+        permissions: {
+          filesystem: "read-only",
+          commands: false,
+          network: false,
+          writablePaths: [],
+          nativeTools: "capability-defaults",
+          mcpTools: [],
+          approvalPolicy: "never",
+          integrations: { commit: false, merge: false, publish: false },
+        },
+        delegation: { profiles: [], maxConcurrent: 4, maxAgents: 16, maxDepth: 3 },
+        isolation: "worktree",
+      });
+      const preamble = codexReplayPreamble({
+        nativeThreadId: "profile-native",
+        nativeTurnId: "unused",
+        prompt: "unused",
+      }).slice(0, 5);
+      const requests: unknown[] = [];
+      const disabledFeatures = [
+        "multi_agent",
+        "multi_agent_v2",
+        "shell_tool",
+        "js_repl",
+        "computer_use",
+        "browser_use",
+        "browser_use_external",
+        "code_mode",
+        "apps",
+        "plugins",
+        "recommended_plugins",
+        "hooks",
+        "codex_hooks",
+        "plugin_hooks",
+      ];
+      yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: "profile-isolation",
+          entries: [
+            ...preamble.slice(0, 3),
+            {
+              type: "expect_outbound",
+              frame: {
+                id: 2,
+                method: "config/read",
+                params: { cwd: "/workspace", includeLayers: false },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                id: 2,
+                result: {
+                  config: {
+                    mcp_servers: { inherited: { command: "unsafe-tool", tool_timeout_sec: null } },
+                  },
+                  origins: {},
+                },
+              },
+            },
+            {
+              type: "expect_outbound",
+              frame: {
+                id: 3,
+                method: "thread/start",
+                params: {
+                  cwd: "/workspace",
+                  model: "gpt-5.4",
+                  config: {
+                    ...CodexAdapterV2.CODEX_THREAD_CONFIG,
+                    "shell_environment_policy.set.T3CODE_THREAD_ID": "thread-profile-isolation",
+                    "agents.enabled": false,
+                    ...Object.fromEntries(
+                      disabledFeatures.map((name) => [`features.${name}`, false]),
+                    ),
+                    allow_login_shell: false,
+                    notify: [],
+                    web_search: "disabled",
+                    mcp_servers: {
+                      inherited: { command: "unsafe-tool", enabled: false },
+                    },
+                  },
+                },
+              },
+            },
+            ...preamble.slice(4).map((entry) => withReplayRequestId(entry, 3)),
+          ],
+        }),
+        () => Effect.void,
+        (method, params) =>
+          Effect.sync(() => {
+            if (method === "thread/start") requests.push(params);
+          }),
+        undefined,
+        undefined,
+        undefined,
+        Effect.succeed(false),
+        { ...CODEX_TEST_RUNTIME_POLICY, agentProfile: profile },
+      );
+      assert.lengthOf(requests, 1);
+      assert.containsAllKeys(requests[0], ["config"]);
+      assert.deepNestedInclude(requests[0], {
+        "config.mcp_servers.inherited.enabled": false,
+      });
+      const config = (requests[0] as { config: Record<string, unknown> }).config;
+      assert.deepEqual(config.mcp_servers, {
+        inherited: { command: "unsafe-tool", enabled: false },
+      });
+      assert.equal(config["features.shell_tool"], false);
+      assert.equal(config["agents.enabled"], false);
+      assert.equal(config["features.multi_agent"], false);
+      assert.equal(config.web_search, "disabled");
     }).pipe(
       Effect.scoped,
       Effect.provide(
