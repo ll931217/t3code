@@ -7,6 +7,7 @@ import {
   CheckpointId,
   CommandId,
   EventId,
+  EnvironmentId,
   MessageId,
   type ModelSelection,
   NodeId,
@@ -31,6 +32,8 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as PeerMcpClient from "../peer/PeerMcpClient.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
@@ -152,6 +155,16 @@ const layerTest = Layer.mergeAll(
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
   Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(PeerMcpClient.PeerMcpClient)({
+        call: () => Effect.die("No remote delegation expected in this fixture"),
+      }),
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("delegated-completion-test")),
+      }),
+    ),
+  ),
   Layer.provide(layerTestProviderInstanceRegistry),
   Layer.provide(layerPlatformTest),
 );

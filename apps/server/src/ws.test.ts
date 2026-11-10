@@ -131,6 +131,9 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
 
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
+import * as AgentProfileService from "./agents/AgentProfileService.ts";
+import * as AgentExecutionService from "./agents/AgentExecutionService.ts";
+import * as AgentExecutionStore from "./agents/AgentExecutionStore.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
@@ -834,6 +837,9 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(TerminalManager.TerminalManager)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadManagement.ThreadManagementService)({}),
+  Layer.mock(AgentProfileService.AgentProfileService)({}),
+  Layer.mock(AgentExecutionService.AgentExecutionService)({}),
+  Layer.mock(AgentExecutionStore.AgentExecutionStore)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
   Layer.mock(UsageService.UsageService)({}),
   Layer.mock(VcsProvisioningService.VcsProvisioningService)({}),

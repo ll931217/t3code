@@ -186,6 +186,9 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as ServerSettings from "./serverSettings.ts";
+import * as AgentProfileService from "./agents/AgentProfileService.ts";
+import * as AgentExecutionService from "./agents/AgentExecutionService.ts";
+import * as AgentExecutionStore from "./agents/AgentExecutionStore.ts";
 import { invalidateSettingsSecrets } from "./sourceControl/sourceControlHostSecrets.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
@@ -1513,6 +1516,9 @@ export const layerWsRpc = (
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const agentProfiles = yield* AgentProfileService.AgentProfileService;
+      const agentExecution = yield* AgentExecutionService.AgentExecutionService;
+      const agentExecutionStore = yield* AgentExecutionStore.AgentExecutionStore;
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
@@ -2051,6 +2057,22 @@ export const layerWsRpc = (
       });
 
       const handlers = ServerWsRpcGroup.of({
+        "agentProfiles.list": ({ projectId }) => agentProfiles.list(projectId),
+        "agentProfiles.save": (input) => agentProfiles.save(input),
+        "agentProfiles.remove": (input) => agentProfiles.remove(input),
+        "agentProfiles.review": (input) => agentProfiles.review(input),
+        "agentProfiles.trust": (input) => agentProfiles.trust(input),
+        "agentProfiles.threadSnapshot": ({ threadId }) => agentProfiles.threadSnapshot(threadId),
+        "agentProfiles.launch": (input) => agentProfiles.launch(input),
+        "agentProfiles.apply": (input) => agentProfiles.apply(input),
+        "agentProfiles.revoke": ({ snapshotId }) => agentProfiles.revoke(snapshotId),
+        "agentExecution.list": ({ threadIds }) => agentExecutionStore.list(threadIds),
+        "agentExecution.update": (input) => agentExecution.update(input, "user"),
+        "agentExecution.stop": (input) => agentExecution.stop(input),
+        "agentExecution.history": ({ threadId }) => agentExecution.history(threadId),
+        "agentExecution.communications": ({ threads }) =>
+          agentExecutionStore.communications(threads),
+        "agentExecution.subscribe": ({ threads }) => agentExecution.subscribe(threads),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
