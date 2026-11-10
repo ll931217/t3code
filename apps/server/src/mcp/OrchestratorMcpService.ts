@@ -129,6 +129,10 @@ import { isLiveCallerShell, threadNotFound } from "./threadAccess.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
+import * as AgentProfileDelegation from "../agents/AgentProfileDelegation.ts";
+import { derive as deriveIds } from "@t3tools/provider-core/server/IdAllocator";
+import { stableStringify } from "@t3tools/shared/relaySigning";
+import { assertAgentProfileCompatible } from "../agents/agentProfilePolicy.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -1038,6 +1042,9 @@ const make = Effect.gen(function* () {
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
+  const profileDelegation = yield* Effect.serviceOption(
+    AgentProfileDelegation.AgentProfileDelegation,
+  );
 
   const requireProject = (projectId: ProjectId) =>
     projects.getById(projectId).pipe(
@@ -2421,6 +2428,11 @@ const make = Effect.gen(function* () {
       };
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, input) {
+      if (input.writablePaths !== undefined && input.profileId === undefined)
+        return yield* failure(
+          "invalid_request",
+          "A narrowed write scope requires an explicit agent profile.",
+        );
       const environmentId =
         input.target === undefined
           ? undefined
@@ -2428,6 +2440,13 @@ const make = Effect.gen(function* () {
       if (input.target !== undefined && environmentId !== undefined) {
         yield* requireCapability(callerScope);
         const scope = yield* requireThreadScope(callerScope, "delegate_task");
+        if (Option.isSome(profileDelegation))
+          yield* profileDelegation.value.assertRemoteAllowed(
+            scope.thread.threadId,
+            input.profileId,
+          );
+        else if (input.profileId !== undefined)
+          return yield* failure("capability_denied", "Profile delegation is unavailable.");
         // The task's child runs as an ordinary thread there; this thread keeps the task.
         const { taskId } = yield* remoteDelegation.delegate(scope, {
           ...input,
@@ -2438,15 +2457,6 @@ const make = Effect.gen(function* () {
           : readTask(scope, taskId, false, true);
       }
       const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
-      if (
-        input.target?.projectId !== undefined &&
-        input.target.projectId !== parent.thread.projectId
-      ) {
-        return yield* failure(
-          "invalid_request",
-          "A local task runs in this thread's project. Omit target.projectId, or pass target.environmentId to run it in that environment's project.",
-        );
-      }
       const parentRun = parent.runs
         .filter(ThreadManagementService.isActiveRun)
         .toSorted((left, right) => right.ordinal - left.ordinal)[0];
@@ -2460,7 +2470,6 @@ const make = Effect.gen(function* () {
           "Delegated tasks require an active run owned by this MCP provider session.",
         );
       }
-      const providers = yield* loadProviders;
       const key = yield* requestKey(input.clientRequestId);
       const commandId = stableCommandId({
         scope,
@@ -2468,12 +2477,78 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+      const targetProjectId = input.target?.projectId ?? parent.thread.projectId;
+      const crossProject = targetProjectId !== parent.thread.projectId;
+      if (crossProject && (input.profileId === undefined || Option.isNone(profileDelegation)))
+        return yield* failure(
+          "invalid_request",
+          "Cross-project delegation requires an allowed agent profile.",
+        );
+      const providers = yield* loadProviders;
+      const destinationProject = crossProject ? yield* requireProject(targetProjectId) : undefined;
+      if (Option.isNone(profileDelegation) && input.profileId !== undefined)
+        return yield* failure("invalid_request", "Agent profile delegation is unavailable.");
+      const profileRequest = {
+        parentThreadId: scope.thread.threadId,
+        childThreadId: deriveIds.delegatedTaskThread({ commandId }),
+        environmentId: scope.environmentId,
+        targetProjectId,
+        ...(destinationProject === undefined
+          ? {}
+          : {
+              destinationScope: {
+                projectId: targetProjectId,
+                workspaceRoot: destinationProject.workspaceRoot,
+              },
+            }),
+        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+        ...(input.writablePaths === undefined ? {} : { writablePaths: input.writablePaths }),
+        commandId,
+        requestKey: stableStringify(input),
+      };
+      const profileSnapshot = Option.isSome(profileDelegation)
+        ? yield* profileDelegation.value.prepare({ ...profileRequest, deferAdmission: true })
+        : null;
+      if (crossProject && profileSnapshot === null)
+        return yield* failure(
+          "invalid_request",
+          "Cross-project delegation requires an allowed agent profile.",
+        );
+      const selectedModel = profileSnapshot?.root.profile.modelSelection;
       const target = yield* resolveTargetRechecking({
-        parent,
-        target: input.target,
+        parent: crossProject
+          ? { thread: { ...parent.thread, projectId: targetProjectId } }
+          : parent,
+        target:
+          selectedModel === undefined
+            ? input.target
+            : {
+                ...input.target,
+                providerInstanceId: selectedModel.instanceId,
+                model: selectedModel.model,
+              },
         providers,
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
       });
+      if (profileSnapshot !== null) {
+        const provider = providers.find(
+          (item) => item.instanceId === profileSnapshot.root.profile.modelSelection.instanceId,
+        );
+        if (provider === undefined)
+          return yield* failure("invalid_request", "The profile provider is unavailable.");
+        yield* assertAgentProfileCompatible(
+          {
+            ...profileSnapshot.root.profile,
+            permissions: {
+              ...profileSnapshot.root.profile.permissions,
+              writablePaths:
+                profileSnapshot.writablePaths ??
+                profileSnapshot.root.profile.permissions.writablePaths,
+            },
+          },
+          provider.driver,
+        ).pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)));
+      }
       const runtimeMode = yield* resolveRuntimeMode(
         parent.thread.runtimeMode,
         input.runtimeMode,
@@ -2484,7 +2559,13 @@ const make = Effect.gen(function* () {
         input.interactionMode,
       );
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
-      if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
+      const isolation = profileSnapshot?.root.profile.isolation ?? input.isolation;
+      if (crossProject)
+        workspaceStrategy =
+          isolation === "worktree"
+            ? { type: "worktree", baseRef: "HEAD", startFromOrigin: false }
+            : { type: "root" };
+      if (!crossProject && isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);
         const base = yield* gitDriver
           .resolveCommit({
@@ -2513,6 +2594,11 @@ const make = Effect.gen(function* () {
         }
         workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
       }
+      if (Option.isSome(profileDelegation) && profileSnapshot !== null)
+        yield* profileDelegation.value.prepare({
+          ...profileRequest,
+          expectedSnapshotId: profileSnapshot.id,
+        });
       // ThreadManagementService.dispatch is the chokepoint for this command
       // type's own enablement check, using the same command id and its
       // receipt-replay exemption, so no separate assert runs here.
@@ -2523,11 +2609,12 @@ const make = Effect.gen(function* () {
           creationSource: "mcp",
           commandId,
           parentThreadId: scope.thread.threadId,
+          ...(crossProject ? { targetProjectId } : {}),
           parentRunId: parentRun.id,
           parentNodeId: parentRun.rootNodeId,
           task: taskPrompt(input),
           ...(input.title === undefined ? {} : { title: input.title }),
-          modelSelection: target.modelSelection,
+          modelSelection: selectedModel ?? target.modelSelection,
           runtimeMode,
           interactionMode,
           ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),

@@ -3,6 +3,8 @@ import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
+import * as Effect from "effect/Effect";
+import { forkParked } from "../serverActivation.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as OrchestrationCommandReceipts from "../persistence/OrchestrationCommandReceipts.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
@@ -50,6 +52,21 @@ import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as AgentProfiles from "../agents/AgentProfiles.ts";
+import * as AgentProfileService from "../agents/AgentProfileService.ts";
+import * as AgentProfileGate from "../agents/AgentProfileGate.ts";
+import * as AgentProfileStops from "../agents/AgentProfileStops.ts";
+import * as AgentProfileStopWorker from "../agents/AgentProfileStopWorker.ts";
+import * as AgentExecutionStore from "../agents/AgentExecutionStore.ts";
+import * as AgentExecutionService from "../agents/AgentExecutionService.ts";
+import * as AgentExecutionObserver from "../agents/AgentExecutionObserver.ts";
+import * as AgentDelegationStore from "../agents/AgentDelegationStore.ts";
+import * as AgentDelegationRuntime from "../agents/AgentDelegationRuntime.ts";
+import * as AgentProfileDelegation from "../agents/AgentProfileDelegation.ts";
+import * as AgentDelegationAuthority from "../agents/AgentDelegationAuthority.ts";
+import * as AgentDelegationAuthorityStore from "../agents/AgentDelegationAuthorityStore.ts";
+import * as AgentDelegationPeerLaunch from "../agents/AgentDelegationPeerLaunch.ts";
+import * as AgentWorktreeActions from "../agents/AgentWorktreeActions.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
@@ -63,8 +80,20 @@ export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationCommandReceipts.layer,
 );
 
-const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
-  Layer.provide(ProjectStore.layer),
+export const layerAgentDelegationAuthority = AgentDelegationAuthority.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      AgentDelegationAuthorityStore.layer,
+      AgentDelegationStore.layer,
+      AgentProfiles.layer,
+      ProjectStore.layer,
+    ),
+  ),
+);
+
+const layerRuntimePolicyProvided = RuntimePolicy.layerEnforcingProfiles.pipe(
+  Layer.provide(RuntimePolicy.layerFromProjectStore.pipe(Layer.provide(ProjectStore.layer))),
+  Layer.provide(AgentProfiles.layer),
 );
 
 const layerEventStoreProvided = EventStore.layerFromOrchestrationEventStore.pipe(
@@ -163,6 +192,8 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
 );
 
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(layerAgentDelegationAuthority),
+  Layer.provide(AgentDelegationStore.layer),
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,
@@ -175,6 +206,12 @@ const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pip
       layerRuntimePolicyProvided,
     ),
   ),
+  (base) =>
+    AgentProfileGate.layerProviderStart.pipe(
+      Layer.provide(base),
+      Layer.provide(AgentProfileGate.layer),
+      Layer.provide(AgentProfileStops.layer),
+    ),
 );
 
 const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
@@ -212,6 +249,12 @@ const layerRunFinalizationServiceProvided = RunFinalizationService.layer.pipe(
 );
 
 const layerOrchestratorProvided = Orchestrator.layer.pipe(
+  Layer.provide(
+    AgentProfileDelegation.layer.pipe(
+      Layer.provide(layerAgentDelegationAuthority),
+      Layer.provide(Layer.mergeAll(AgentProfiles.layer, AgentDelegationStore.layer)),
+    ),
+  ),
   Layer.provide(
     Layer.mergeAll(
       layerCheckpointServiceProvided,
@@ -368,7 +411,14 @@ export const layer = Layer.mergeAll(
   layerLegacyV1ThreadImporterProvided,
 );
 
+const layerProfileStopWorkerProvided = AgentProfileStopWorker.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(AgentProfileStops.layer, AgentProfileGate.layer, layerThreadManagementProvided),
+  ),
+);
+
 export const layerProduction = Layer.mergeAll(
+  AgentProfileStopWorker.layerWorker.pipe(Layer.provide(layerProfileStopWorkerProvided)),
   WorktreeBranchSync.layer.pipe(
     Layer.provide(Layer.merge(layerThreadManagementProvided, ProjectionStore.layer)),
   ),
@@ -376,6 +426,69 @@ export const layerProduction = Layer.mergeAll(
   layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  AgentProfiles.layer,
+  AgentExecutionStore.layer,
+  AgentExecutionObserver.layerWorker.pipe(
+    Layer.provide(AgentExecutionObserver.layer),
+    Layer.provide(Layer.mergeAll(AgentExecutionStore.layer, layerEventSink)),
+  ),
+  AgentDelegationStore.layer,
+  AgentDelegationAuthorityStore.layer,
+  layerAgentDelegationAuthority,
+  AgentDelegationPeerLaunch.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        layerAgentDelegationAuthority,
+        layerThreadLaunchProvided,
+        ProjectionStore.layer,
+      ),
+    ),
+  ),
+  AgentProfileDelegation.layer.pipe(
+    Layer.provide(layerAgentDelegationAuthority),
+    Layer.provide(Layer.mergeAll(AgentProfiles.layer, AgentDelegationStore.layer)),
+  ),
+  Layer.effectDiscard(
+    Effect.flatMap(AgentDelegationRuntime.AgentDelegationRuntime, (runtime) =>
+      forkParked(runtime.run),
+    ),
+  ).pipe(
+    Layer.provide(AgentDelegationRuntime.layer),
+    Layer.provide(layerAgentDelegationAuthority),
+    Layer.provide(
+      Layer.mergeAll(
+        AgentDelegationStore.layer,
+        ProjectionStore.layer,
+        EffectOutbox.layer,
+        layerEventSink,
+      ),
+    ),
+  ),
+  AgentProfileService.layer.pipe(
+    Layer.provide(AgentProfileGate.layer),
+    Layer.provide(layerProfileStopWorkerProvided),
+    Layer.provide(
+      Layer.mergeAll(
+        AgentProfiles.layer,
+        ProjectStore.layer,
+        layerThreadLaunchProvided,
+        layerThreadManagementProvided,
+      ),
+    ),
+  ),
+  AgentExecutionService.layer.pipe(
+    Layer.provide(Layer.mergeAll(AgentExecutionStore.layer, layerThreadManagementProvided)),
+  ),
+  AgentWorktreeActions.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        AgentProfiles.layer,
+        AgentProfileGate.layer,
+        layerThreadManagementProvided,
+        ProjectStore.layer,
+      ),
+    ),
+  ),
   layerScheduledTaskProvided,
   layerScratchThreadPromotionProvided,
   layerSecretRequestsProvided,
