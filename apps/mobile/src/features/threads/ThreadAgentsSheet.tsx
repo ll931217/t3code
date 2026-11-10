@@ -15,8 +15,8 @@ import { StackActions, useNavigation, type StaticScreenProps } from "@react-navi
 import * as DateTime from "effect/DateTime";
 import { Atom } from "effect/reactivity";
 import * as Haptics from "expo-haptics";
-import { useMemo } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SheetHeader } from "../../components/ui/SheetHeader";
@@ -31,6 +31,8 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { subagentThreadTarget } from "./threadAgentsPresentation";
 
 import { useOpenThreadInspector } from "./thread-inspector-navigation";
+import { AgentExecutionWorkspace } from "./AgentExecutionWorkspace";
+import { Button } from "../../components/ui/Button";
 
 type AgentsTarget = { readonly environmentId: EnvironmentId; readonly threadId: ThreadId };
 
@@ -47,6 +49,7 @@ export function useThreadTurnSubagents(target: AgentsTarget | null): ThreadTurnS
 }
 
 export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
+  const [execution, setExecution] = useState(true);
   const target = route.params;
   const navigation = useNavigation();
   const openInspector = useOpenThreadInspector();
@@ -126,9 +129,33 @@ export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
   );
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
+    <View
+      collapsable={false}
+      // Android FormSheet does not bound flex children.
+      className={Platform.OS === "android" ? "absolute inset-0 bg-sheet" : "flex-1 bg-sheet"}
+    >
       <SheetHeader title="Agents" onClose={() => navigation.goBack()} />
-      <ScreenContent>{content}</ScreenContent>
+      <View className="flex-row gap-2 px-5 py-2">
+        <Button
+          label="Execution tree"
+          size="compact"
+          tone={execution ? "primary" : "secondary"}
+          onPress={() => setExecution(true)}
+        />
+        <Button
+          label="Turn agents"
+          size="compact"
+          tone={!execution ? "primary" : "secondary"}
+          onPress={() => setExecution(false)}
+        />
+      </View>
+      <ScreenContent>
+        {execution ? (
+          <AgentExecutionWorkspace threadRef={target} onOpen={openChildThread} />
+        ) : (
+          content
+        )}
+      </ScreenContent>
     </View>
   );
 }
