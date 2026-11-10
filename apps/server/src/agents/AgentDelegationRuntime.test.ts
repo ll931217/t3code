@@ -22,6 +22,7 @@ import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexA
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as AgentDelegationStore from "./AgentDelegationStore.ts";
 import * as AgentDelegationRuntime from "./AgentDelegationRuntime.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
 
 const environmentId = EnvironmentId.make("local");
 const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "test-model" };
@@ -29,6 +30,7 @@ const database = SqlitePersistence.layerMemory;
 const base = Layer.mergeAll(
   database,
   AgentDelegationStore.layer.pipe(Layer.provide(database)),
+  Cancellations.layer.pipe(Layer.provide(database)),
   ProjectionStore.layer.pipe(Layer.provide(database)),
   EffectOutbox.layer.pipe(Layer.provide(database)),
   Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
@@ -136,6 +138,25 @@ it.effect(
       );
       assert.strictEqual(resumed.length, 1);
       assert.notStrictEqual(resumed[0]?.id, starts[0]?.id);
+      const cancellations = yield* Cancellations.AgentDelegationCancellations;
+      yield* cancellations.request(second, CommandId.make("cancel-second"));
+      yield* store.deferStart({ child: second, runId: secondRun.id });
+      yield* projections.apply({
+        id: EventId.make("interrupted-second"),
+        type: "run.updated",
+        threadId: second.threadId,
+        occurredAt: now,
+        payload: { ...secondRun, status: "interrupted", completedAt: now },
+      });
+      yield* runtime.reconcile;
+      assert.strictEqual((yield* store.get(second))?.status, "active");
+      assert.strictEqual((yield* store.pendingStarts()).length, 1);
+      assert.deepStrictEqual(
+        yield* outbox.listByCommandId(
+          CommandId.make(`agent-admission:${environmentId}:${secondRun.id}:3`),
+        ),
+        [],
+      );
       const foreign = {
         environmentId: EnvironmentId.make("authority-elsewhere"),
         threadId: ThreadId.make("foreign-root"),
@@ -156,6 +177,7 @@ it.effect(
       yield* runtime.reconcile;
       assert.strictEqual((yield* store.get(remoteOwned))?.status, "queued");
       assert.deepStrictEqual(yield* store.pendingStarts(), [
+        { child: second, runId: secondRun.id, generation: 3 },
         { child: remoteOwned, runId: secondRun.id, generation: 1 },
       ]);
     }).pipe(Effect.provide(testLayer)),

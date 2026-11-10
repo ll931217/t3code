@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as AgentProfiles from "./AgentProfiles.ts";
 import * as AgentProfileStops from "./AgentProfileStops.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
 import * as AgentProfileDelegation from "./AgentProfileDelegation.ts";
 import * as AgentDelegationStore from "./AgentDelegationStore.ts";
 import * as AgentDelegationAuthorityStore from "./AgentDelegationAuthorityStore.ts";
@@ -46,7 +47,7 @@ const profile = (id: string, dependencies: string[] = []) =>
     isolation: "worktree",
   });
 const testLayer = () =>
-  Layer.merge(AgentProfiles.layer, AgentProfileStops.layer).pipe(
+  Layer.mergeAll(AgentProfiles.layer, AgentProfileStops.layer, Cancellations.layer).pipe(
     Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(NodeCrypto.layer),
@@ -174,6 +175,17 @@ it.effect(
             })
             .pipe(Effect.flip)).code,
         ).toBe("capability_denied");
+        const cancellations = yield* Cancellations.AgentDelegationCancellations;
+        yield* cancellations.request(
+          { environmentId: preparedInput.environmentId, threadId },
+          CommandId.make("cancel-tree"),
+        );
+        expect((yield* delegation.prepare(preparedInput).pipe(Effect.flip)).code).toBe(
+          "capability_denied",
+        );
+        expect((yield* delegation.assertCommand(command).pipe(Effect.flip)).code).toBe(
+          "capability_denied",
+        );
       }).pipe(
         Effect.provide(
           AgentProfileDelegation.layer.pipe(

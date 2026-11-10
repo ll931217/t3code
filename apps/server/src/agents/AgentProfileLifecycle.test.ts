@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { CommandId, EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -9,6 +9,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as AgentProfileGate from "./AgentProfileGate.ts";
 import * as AgentProfileStops from "./AgentProfileStops.ts";
+import * as Cancellations from "./AgentDelegationCancellations.ts";
+import * as Identity from "../environment/ServerEnvironment.ts";
+import * as ProviderStart from "../orchestration-v2/ProviderTurnStartService.ts";
 import migrateStopGenerations from "../persistence/Migrations/088_AgentProfileStopGenerations.ts";
 
 it.effect(
@@ -93,5 +96,54 @@ it.effect("upgrades pending stops from the original lifecycle schema without los
     yield* stops.assertSettled(threadId);
   }).pipe(
     Effect.provide(AgentProfileStops.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
+  ),
+);
+
+it.effect("rejects delayed provider starts after cancellation acknowledgement and reopening", () =>
+  Effect.gen(function* () {
+    const cancellations = yield* Cancellations.AgentDelegationCancellations;
+    const environmentId = EnvironmentId.make("local");
+    const threadId = ThreadId.make("cancelled-start");
+    const request = yield* cancellations.request(
+      { environmentId, threadId },
+      CommandId.make("cancel"),
+    );
+    yield* cancellations.acknowledge(request);
+    let starts = 0;
+    const layer = AgentProfileGate.layerProviderStart.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          AgentProfileGate.layer,
+          Layer.succeed(Identity.ServerEnvironmentIdentity, {
+            getEnvironmentId: Effect.succeed(environmentId),
+          }),
+          Layer.succeed(ProviderStart.ProviderTurnStartServiceV2, {
+            start: () =>
+              Effect.sync(() => {
+                starts += 1;
+              }),
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderStart.ProviderTurnStartServiceV2;
+      const result = yield* provider
+        .start({ threadId, runId: RunId.make("delayed") })
+        .pipe(Effect.flip);
+      assert.strictEqual(result._tag, "ProviderTurnStartError");
+      assert.strictEqual(starts, 0);
+      yield* provider.start({
+        threadId: ThreadId.make("fresh-thread"),
+        runId: RunId.make("fresh-run"),
+      });
+      assert.strictEqual(starts, 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(Cancellations.layer, AgentProfileStops.layer).pipe(
+        Layer.provideMerge(SqlitePersistence.layerMemory),
+      ),
+    ),
   ),
 );
