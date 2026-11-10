@@ -65,6 +65,8 @@ import * as AgentDelegationRuntime from "../agents/AgentDelegationRuntime.ts";
 import * as AgentProfileDelegation from "../agents/AgentProfileDelegation.ts";
 import * as AgentDelegationAuthority from "../agents/AgentDelegationAuthority.ts";
 import * as AgentDelegationAuthorityStore from "../agents/AgentDelegationAuthorityStore.ts";
+import * as AgentDelegationCancellations from "../agents/AgentDelegationCancellations.ts";
+import * as AgentDelegationCancellationService from "../agents/AgentDelegationCancellationService.ts";
 import * as AgentDelegationPeerLaunch from "../agents/AgentDelegationPeerLaunch.ts";
 import * as AgentWorktreeActions from "../agents/AgentWorktreeActions.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
@@ -84,6 +86,7 @@ export const layerAgentDelegationAuthority = AgentDelegationAuthority.layer.pipe
   Layer.provide(
     Layer.mergeAll(
       AgentDelegationAuthorityStore.layer,
+      AgentDelegationCancellations.layer,
       AgentDelegationStore.layer,
       AgentProfiles.layer,
       ProjectStore.layer,
@@ -211,6 +214,7 @@ const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pip
       Layer.provide(base),
       Layer.provide(AgentProfileGate.layer),
       Layer.provide(AgentProfileStops.layer),
+      Layer.provide(AgentDelegationCancellations.layer),
     ),
 );
 
@@ -257,6 +261,7 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
           AgentProfiles.layer,
           AgentDelegationStore.layer,
           AgentDelegationAuthorityStore.layer,
+          AgentDelegationCancellations.layer,
         ),
       ),
     ),
@@ -423,7 +428,24 @@ const layerProfileStopWorkerProvided = AgentProfileStopWorker.layer.pipe(
   ),
 );
 
+const layerDelegationCancellationProvided = AgentDelegationCancellationService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      AgentDelegationCancellations.layer,
+      AgentDelegationStore.layer,
+      AgentDelegationAuthorityStore.layer,
+      AgentProfileGate.layer,
+      ProjectionStore.layer,
+      layerThreadManagementProvided,
+    ),
+  ),
+);
+
 export const layerProduction = Layer.mergeAll(
+  layerDelegationCancellationProvided,
+  AgentDelegationCancellationService.layerWorker.pipe(
+    Layer.provide(layerDelegationCancellationProvided),
+  ),
   AgentProfileStopWorker.layerWorker.pipe(Layer.provide(layerProfileStopWorkerProvided)),
   WorktreeBranchSync.layer.pipe(
     Layer.provide(Layer.merge(layerThreadManagementProvided, ProjectionStore.layer)),
@@ -457,6 +479,7 @@ export const layerProduction = Layer.mergeAll(
         AgentProfiles.layer,
         AgentDelegationStore.layer,
         AgentDelegationAuthorityStore.layer,
+        AgentDelegationCancellations.layer,
       ),
     ),
   ),
@@ -467,6 +490,7 @@ export const layerProduction = Layer.mergeAll(
   ).pipe(
     Layer.provide(AgentDelegationRuntime.layer),
     Layer.provide(layerAgentDelegationAuthority),
+    Layer.provide(AgentDelegationCancellations.layer),
     Layer.provide(
       Layer.mergeAll(
         AgentDelegationStore.layer,
@@ -489,6 +513,7 @@ export const layerProduction = Layer.mergeAll(
     ),
   ),
   AgentExecutionService.layer.pipe(
+    Layer.provide(layerDelegationCancellationProvided),
     Layer.provide(Layer.mergeAll(AgentExecutionStore.layer, layerThreadManagementProvided)),
   ),
   AgentWorktreeActions.layer.pipe(

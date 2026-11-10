@@ -143,20 +143,6 @@ export const layer = Layer.effect(
             delegatedFrom: { ...grant.reservation.parent, title: input.title },
           })
           .pipe(
-            Effect.tapError((cause) =>
-              Effect.logWarning("agent-delegation.launch-failed", {
-                threadId: grant.reservation.child.threadId,
-                operation: cause._tag === "ThreadLaunchError" ? cause.operation : "provider-check",
-                detail:
-                  cause._tag === "ThreadLaunchError"
-                    ? cause.cause instanceof Error
-                      ? cause.cause.message
-                      : typeof cause.cause === "string"
-                        ? cause.cause
-                        : "Launch operation failed."
-                    : cause.message,
-              }),
-            ),
             Effect.mapError(
               (cause) =>
                 new OrchestratorMcpFailure({

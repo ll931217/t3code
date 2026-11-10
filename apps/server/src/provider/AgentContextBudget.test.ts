@@ -9,6 +9,7 @@ import { McpServer } from "effect/ai";
 
 import { AssetSigner } from "../assets/AssetSigner.ts";
 import { AgentExecutionService } from "../agents/AgentExecutionService.ts";
+import { AgentDelegationCancellationService } from "../agents/AgentDelegationCancellationService.ts";
 import { AgentExecutionStore } from "../agents/AgentExecutionStore.ts";
 import { AgentDelegationAuthority } from "../agents/AgentDelegationAuthority.ts";
 import { AgentDelegationAuthorityStore } from "../agents/AgentDelegationAuthorityStore.ts";
@@ -59,6 +60,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(AgentDelegationPeerLaunch)({}),
   Layer.mock(AgentWorktreeActions)({}),
   Layer.mock(AgentExecutionService)({}),
+  Layer.mock(AgentDelegationCancellationService)({}),
   Layer.mock(AgentExecutionStore)({}),
   Layer.mock(AssetSigner)({}),
   Layer.mock(DeviceService)({}),

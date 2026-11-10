@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Service from "../../../agents/AgentExecutionService.ts";
+import * as Cancellation from "../../../agents/AgentDelegationCancellationService.ts";
 import * as Store from "../../../agents/AgentExecutionStore.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -34,6 +35,7 @@ it.effect("keeps execution updates on the authenticated thread with agent proven
         capabilities: new Set<Invocation.McpCapability>(["orchestration"]),
       }),
     ).pipe(
+      Layer.provide(Layer.mock(Cancellation.AgentDelegationCancellationService)({})),
       Layer.provideMerge(
         Layer.mock(Threads.ThreadManagementService)({
           getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),

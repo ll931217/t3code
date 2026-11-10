@@ -45,9 +45,11 @@ Claude Agent; unsupported permissions are rejected instead of silently widened.
 Open the **Agents** workspace to follow the execution tree. Selecting a node shows its objective,
 tasks, verification evidence, and results without leaving your thread. Use **Open thread** to enter
 its conversation. Checklist edits steer the selected agent; a manual pass requires evidence and
-your explicit confirmation. **Stop this agent** leaves descendants running, while **Cancel
-subtree** cancels its delegated work too. Unavailable environments retain the last known graph;
-delivery status distinguishes sent messages from acknowledged work.
+your explicit confirmation. **Stop this agent** interrupts only that agent and leaves descendants
+running. **Cancel subtree** permanently closes that execution subtree, including reserved agents
+that have not started. Launch a new profiled thread to begin a fresh execution tree. Remote
+cancellation remains pending until the destination confirms the stop. Unavailable environments
+retain the last known graph; delivery status distinguishes sent messages from acknowledged work.
 
 ## Provider differences
 
