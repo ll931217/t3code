@@ -307,13 +307,17 @@ interface ProviderSettingsTarget {
   readonly projectIds?: readonly ProjectId[];
 }
 
-export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
+export function ProviderSettingsPanel({
+  children,
+  ...target
+}: ProviderSettingsTarget & { readonly children?: ReactNode }) {
   return (
     <SettingsPageContainer className="@container/providers gap-8">
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
       />
+      {children}
     </SettingsPageContainer>
   );
 }
