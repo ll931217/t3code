@@ -339,6 +339,22 @@
       "types": "./src/state/threadInbox.ts",
       "default": "./src/state/threadInbox.ts"
     },
+    "./state/agent-execution-graph": {
+      "types": "./src/state/agentExecutionGraph.ts",
+      "default": "./src/state/agentExecutionGraph.ts"
+    },
+    "./state/agent-execution": {
+      "types": "./src/state/agentExecution.ts",
+      "default": "./src/state/agentExecution.ts"
+    },
+    "./state/agent-profiles": {
+      "types": "./src/state/agentProfiles.ts",
+      "default": "./src/state/agentProfiles.ts"
+    },
+    "./state/agent-workspace": {
+      "types": "./src/state/agentWorkspace.ts",
+      "default": "./src/state/agentWorkspace.ts"
+    },
     "./state/thread-relationships": {
       "types": "./src/state/threadRelationships.ts",
       "default": "./src/state/threadRelationships.ts"
