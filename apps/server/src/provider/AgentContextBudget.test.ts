@@ -1,13 +1,19 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { AGENT_DELEGATION_PEER_TOOLS, ProviderInstanceId } from "@t3tools/contracts";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { McpServer } from "effect/ai";
 
 import { AssetSigner } from "../assets/AssetSigner.ts";
+import { AgentExecutionService } from "../agents/AgentExecutionService.ts";
+import { AgentExecutionStore } from "../agents/AgentExecutionStore.ts";
+import { AgentDelegationAuthority } from "../agents/AgentDelegationAuthority.ts";
+import { AgentDelegationAuthorityStore } from "../agents/AgentDelegationAuthorityStore.ts";
+import { AgentDelegationPeerLaunch } from "../agents/AgentDelegationPeerLaunch.ts";
+import { AgentWorktreeActions } from "../agents/AgentWorktreeActions.ts";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import { DeviceService } from "../device/DeviceService.ts";
@@ -48,6 +54,12 @@ import budget from "./agentContextBudget.json" with { type: "json" };
 
 // Registration only stores tool definitions, so the handlers' services are never called.
 const toolHandlerServices = Layer.mergeAll(
+  Layer.mock(AgentDelegationAuthority)({}),
+  Layer.mock(AgentDelegationAuthorityStore)({}),
+  Layer.mock(AgentDelegationPeerLaunch)({}),
+  Layer.mock(AgentWorktreeActions)({}),
+  Layer.mock(AgentExecutionService)({}),
+  Layer.mock(AgentExecutionStore)({}),
   Layer.mock(AssetSigner)({}),
   Layer.mock(DeviceService)({}),
   Layer.mock(DocumentText)({}),
@@ -83,6 +95,7 @@ const toolHandlerServices = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
+const peerOnlyTools = new Set<string>(Object.values(AGENT_DELEGATION_PEER_TOOLS));
 
 const claudeSystemAppend = () => {
   const { systemPrompt } = makeClaudeQueryOptions({
@@ -135,11 +148,13 @@ it.effect("agent context matches the committed budget", () =>
       // The model sees these fields. outputSchema and annotations are protocol metadata.
       mcpToolListJsonBytes: utf8Bytes(
         JSON.stringify(
-          mcp.tools.map(({ tool }) => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-          })),
+          mcp.tools
+            .filter(({ tool }) => !peerOnlyTools.has(tool.name))
+            .map(({ tool }) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })),
         ),
       ),
     };
