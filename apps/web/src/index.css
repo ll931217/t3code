@@ -1114,7 +1114,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    glass. Busy indicators keep their static glyph; overlays that only exist to
    animate are hidden. */
 html.reduce-effects {
-  --glass-opacity: 100%;
+  --glass-opacity: 100% !important;
 }
 
 html.reduce-effects *,
