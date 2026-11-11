@@ -29,7 +29,7 @@ function stubWindow(options: { desktopBridge?: unknown; prefersReducedMotion?: b
     listeners,
     setPrefersReducedMotion: (matches: boolean) => {
       media.matches = matches;
-      for (const listener of [...listeners]) listener();
+      for (const listener of listeners) listener();
     },
   };
 }

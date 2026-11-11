@@ -16,6 +16,7 @@ const {
   copyFileSyncMock,
   execFileSyncMock,
   readFileSyncMock,
+  disableHardwareAccelerationMock,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -27,11 +28,13 @@ const {
   copyFileSyncMock: vi.fn(),
   execFileSyncMock: vi.fn(),
   readFileSyncMock: vi.fn(),
+  disableHardwareAccelerationMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
   app: {
     setDesktopName: setDesktopNameMock,
+    disableHardwareAcceleration: disableHardwareAccelerationMock,
     getVersion: () => "0.0.37",
     isPackaged: true,
     getAppPath: () => "/tmp/.mount_T3/resources/app.asar",
@@ -72,7 +75,27 @@ describe("DesktopPreReadyPlatform", () => {
     copyFileSyncMock.mockReset();
     execFileSyncMock.mockReset();
     readFileSyncMock.mockReset().mockReturnValue("{}");
+    disableHardwareAccelerationMock.mockReset();
   });
+
+  it.effect.each([
+    { env: { T3CODE_DISABLE_GPU: "1" }, calls: 1 },
+    { env: {}, calls: 0 },
+  ])(
+    "disables hardware acceleration only when T3CODE_DISABLE_GPU is set ($calls)",
+    ({ env, calls }) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Layer.build(
+            DesktopPreReadyPlatform.layer.pipe(
+              Layer.provide(Layer.succeed(HostProcess.Platform, "darwin")),
+              Layer.provide(DesktopConfig.layerTest(env)),
+            ),
+          );
+          assert.equal(disableHardwareAccelerationMock.mock.calls.length, calls);
+        }),
+      ),
+  );
 
   it.effect("persists Linux scaling synchronously across relaunches and settings rewrites", () => {
     vi.stubEnv("T3CODE_HOME", "/isolated");
