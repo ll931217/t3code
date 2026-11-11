@@ -1,11 +1,11 @@
 import { memo, useEffect, useRef, type ReactNode } from "react";
-import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { useReduceEffects } from "../../lib/reduceEffects";
 
 const WAVEFORM_BAR_COUNT = 28;
 const WAVEFORM_BAR_IDS = Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => String(index));
 
 export const VoiceWaveform = memo(function VoiceWaveform(props: { level: number }) {
-  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const prefersReducedMotion = useReduceEffects();
   const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
   const levelsRef = useRef(Array<number>(WAVEFORM_BAR_COUNT).fill(0));
 

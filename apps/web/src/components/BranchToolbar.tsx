@@ -68,6 +68,7 @@ import { ComposerSurface } from "./chat/ComposerSurface";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
+import { shouldReduceEffects } from "../lib/reduceEffects";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
@@ -454,7 +455,7 @@ function animateLabelWidths(
 ) {
   for (const animation of animations.values()) animation.cancel();
   animations.clear();
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (shouldReduceEffects()) return;
 
   for (const [label, previousRect] of previousRects) {
     if (!label.isConnected) continue;

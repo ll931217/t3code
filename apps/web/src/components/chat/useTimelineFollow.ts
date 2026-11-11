@@ -39,6 +39,7 @@ import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import type { deriveThreadActivityRun } from "@t3tools/client-runtime/state/thread-execution";
 import type { EnvironmentThreadStatus } from "@t3tools/client-runtime/state/threads";
 import type { TimelineEntry } from "../../session-logic";
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 
 interface TimelineAnchor {
   readonly threadKey: string | null;
@@ -316,7 +317,7 @@ export function useTimelineFollow(input: TimelineFollowInput) {
       if (!list) return;
       void Promise.resolve(
         list.scrollToEnd?.({
-          animated: animated && !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+          animated: animated && !shouldReduceEffects(),
         }),
       ).then(() =>
         settleListScroll(
@@ -409,7 +410,7 @@ export function useTimelineFollow(input: TimelineFollowInput) {
         void list
           .scrollToIndex({
             index: anchorIndex,
-            animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+            animated: !shouldReduceEffects(),
             viewPosition: 0,
             viewOffset: CHAT_LIST_ANCHOR_OFFSET,
           })

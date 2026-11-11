@@ -93,7 +93,6 @@ import { useThreadFindNavigation } from "./useThreadFindNavigation";
 import { TooltipScrollDismissArea } from "../ui/tooltip";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
-import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { type HandoffTimelineRun } from "./V2LifecycleRow";
@@ -137,6 +136,7 @@ import { useThreadFindPositionReader } from "./useThreadFindPositionReader";
 import { ThreadActivityAnnouncer } from "./ThreadActivityAnnouncer";
 import { useStableHandoffRuns, useIncrementalTimelineRows, useStableRows } from "./useTimelineRows";
 import { useClientSettings } from "../../hooks/useSettings";
+import { shouldReduceEffects, useReduceEffects } from "../../lib/reduceEffects";
 
 function timelineListStateFor(identity: string): {
   readonly identity: string;
@@ -429,7 +429,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     listState.rememberedPosition?.atEnd === false || findOpen ? null : listIdentityKey,
   );
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
-  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const prefersReducedMotion = useReduceEffects();
   const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(listIdentityKey);
   const [playingAudioRows, setPlayingAudioRows] = useState<ReadonlyMap<HTMLAudioElement, string>>(
     () => new Map(),
@@ -1341,7 +1341,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 navigateTimeline();
                 void listRef.current?.scrollToIndex({
                   index: item.rowIndex,
-                  animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+                  animated: !shouldReduceEffects(),
                   viewOffset: 24,
                 });
               }}
