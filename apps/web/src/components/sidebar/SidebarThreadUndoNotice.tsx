@@ -7,6 +7,7 @@ import {
   undoLatestThreadAction,
   useThreadUndoNotice,
 } from "../../hooks/showThreadUndoNotice";
+import { useReduceEffects } from "../../lib/reduceEffects";
 import { cn } from "../../lib/utils";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { InlineButton } from "../ui/button";
@@ -16,6 +17,7 @@ import { SidebarMenuItem } from "../ui/sidebar";
 export function SidebarThreadUndoNotice() {
   const notice = useThreadUndoNotice((state) => state.notice);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const reduceEffects = useReduceEffects();
   // Short enough to fit beside the utility icons; screen readers hear the full summary.
   const summary = notice
     ? notice.count === 1
@@ -23,11 +25,11 @@ export function SidebarThreadUndoNotice() {
       : `${notice.action} ${notice.count}`
     : null;
 
-  // Keeps the last text on screen while it fades out, then unmounts on transitionend.
+  // Keeps the last text on screen while it fades out, then unmounts on transitionend (at once when effects are reduced: no transition runs).
   const [shownSummary, setShownSummary] = useState(summary);
   if (summary && summary !== shownSummary) setShownSummary(summary);
   const text = summary ?? shownSummary;
-  if (!text) return null;
+  if (!text || (reduceEffects && !summary)) return null;
 
   return (
     <SidebarMenuItem
