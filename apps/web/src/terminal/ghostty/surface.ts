@@ -19,7 +19,7 @@ import {
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { isMonospaceFamily } from "../../appearanceFonts";
 import { observeResize } from "../../lib/observeResize";
-import { shouldReduceEffects } from "../../lib/reduceEffects";
+import { shouldReduceEffects, subscribeToReducedMotion } from "../../lib/reduceEffects";
 
 const DEFAULT_TERMINAL_FONT_SIZE = 12;
 const MIN_TERMINAL_FONT_SIZE = 6;
@@ -640,7 +640,7 @@ export class GhosttyTerminalSurface {
   private mouseAnyEventTracking = false;
   private dprMedia: MediaQueryList | null = null;
   // Watch reduced motion changes to restart blink cycles that have no remaining timer.
-  private readonly reducedMotionMedia = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  private unsubscribeReducedMotion: (() => void) | null = null;
   private inputLeft = -1;
   private inputTop = -1;
 
@@ -673,7 +673,7 @@ export class GhosttyTerminalSurface {
     this.fontSize = terminalFontSize(options.font?.size);
     this.installEvents();
     this.watchDevicePixelRatio();
-    this.reducedMotionMedia?.addEventListener("change", this.onReducedMotionChange);
+    this.unsubscribeReducedMotion = subscribeToReducedMotion(this.onReducedMotionChange);
     document.fonts.addEventListener("loadingdone", this.onFontsLoaded);
     this.stopObservingResize = observeResize(mount, () => this.fit());
   }
@@ -1084,7 +1084,8 @@ export class GhosttyTerminalSurface {
     document.fonts.removeEventListener("loadingdone", this.onFontsLoaded);
     this.dprMedia?.removeEventListener("change", this.onDevicePixelRatioChange);
     this.dprMedia = null;
-    this.reducedMotionMedia?.removeEventListener("change", this.onReducedMotionChange);
+    this.unsubscribeReducedMotion?.();
+    this.unsubscribeReducedMotion = null;
     if (this.selectionScrollTimer !== null) window.clearInterval(this.selectionScrollTimer);
     if (this.resizeNotifyTimer !== null) {
       window.clearTimeout(this.resizeNotifyTimer);
