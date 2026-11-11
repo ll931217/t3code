@@ -1032,6 +1032,7 @@ export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getRelayTelemetryEnabled: () => boolean;
+  getReduceEffects: () => boolean;
   getPathForFile: (file: File) => string;
   getClientPlatform: () => string;
   setNotificationBadge: (badge: { count: number; image: string | null }) => Promise<void>;

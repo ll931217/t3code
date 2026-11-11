@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema";
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
+import * as DesktopConfig from "../../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopManagedPolicy from "../../app/DesktopManagedPolicy.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
@@ -96,6 +97,14 @@ export const installRelayTelemetryEnabled = Effect.fn("desktop.ipc.window.instal
     );
   },
 );
+
+export const getReduceEffects = DesktopIpc.makeSyncIpcMethod({
+  channel: IpcChannels.GET_REDUCE_EFFECTS_CHANNEL,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.window.getReduceEffects")(function* () {
+    return (yield* DesktopConfig.DesktopConfig).reduceEffects;
+  }),
+});
 
 export const getSystemLocale = DesktopIpc.makeSyncIpcMethod({
   channel: IpcChannels.GET_SYSTEM_LOCALE_CHANNEL,
