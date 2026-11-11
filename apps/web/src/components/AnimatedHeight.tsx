@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { observeResize } from "../lib/observeResize";
+import { shouldReduceEffects } from "../lib/reduceEffects";
 
 const HEIGHT_TRANSITION_FALLBACK_MS = 250;
 
@@ -45,7 +46,7 @@ export function AnimatedHeight({
         if (currentState.height === nextHeight) return currentState;
         return {
           height: nextHeight,
-          isClipping: currentState.height !== null,
+          isClipping: currentState.height !== null && !shouldReduceEffects(),
         };
       });
     };
