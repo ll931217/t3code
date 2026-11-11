@@ -212,6 +212,10 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
     transition: none;
   }
 }
+:host-context(.reduce-effects) [data-diff],
+:host-context(.reduce-effects) [data-file] {
+  transition: none;
+}
 `;
 
 export type StyledDiffCodeViewOptions<LAnnotation> = Omit<

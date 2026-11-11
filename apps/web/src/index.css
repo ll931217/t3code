@@ -1110,6 +1110,27 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   animation-duration: 0s !important;
 }
 
+/* Reduce-effects mode (see lib/reduceEffects.ts): no animation, no blur, solid
+   glass. Busy indicators keep their static glyph; overlays that only exist to
+   animate are hidden. */
+html.reduce-effects {
+  --glass-opacity: 100%;
+}
+
+html.reduce-effects *,
+html.reduce-effects *::before,
+html.reduce-effects *::after {
+  animation: none !important;
+  transition: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.reduce-effects .live-activity-focus,
+html.reduce-effects .animate-status-ping {
+  opacity: 0;
+}
+
 :root {
   color-scheme: light;
   --radius: 0.5rem;

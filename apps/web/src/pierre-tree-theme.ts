@@ -16,6 +16,7 @@ export const PIERRE_TREE_UNSAFE_CSS = `
   @media (prefers-reduced-motion: no-preference) {
     svg[data-icon-name='t3-tree-icon-loading'] { animation: t3-tree-spin 1s linear infinite; }
   }
+  :host-context(.reduce-effects) svg[data-icon-name='t3-tree-icon-loading'] { animation: none; }
   @keyframes t3-tree-spin { to { transform: rotate(360deg); } }
 `;
 

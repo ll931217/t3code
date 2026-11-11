@@ -48,6 +48,21 @@ The main sidebar, right panel, and terminal drawer open and close immediately by
 in your operating system. Moving between threads always snaps to the selected thread's panel state
 without replaying its transitions.
 
+## Reduce effects
+
+On a remote desktop or a machine without a GPU, every animated frame costs CPU. Reduce effects turns
+off animations, transitions, and blur, makes translucent surfaces solid, and leaves spinners
+static. Turn it on in either way:
+
+- Start the desktop app with `T3CODE_REDUCE_EFFECTS=1` in its environment.
+- Enable reduced motion in your operating system. This works in the desktop app and in any browser.
+
+A browser that connects to a server only follows the operating system setting, since the variable
+applies to the desktop app that reads it.
+
+If the desktop app is still slow, start it with `T3CODE_DISABLE_GPU=1` to turn off hardware
+acceleration. It is separate from reduce effects, so you can try each one alone.
+
 ## Custom themes
 
 On web and desktop, choose **Create theme** to adjust a palette, or import a T3 Code or VS Code
