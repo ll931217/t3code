@@ -41,6 +41,7 @@ import {
   openQuestionAttachmentDraft,
 } from "../../questionAttachments";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 
 type CaptureTarget = DraftId | ScopedThreadRef;
 type CaptureFailure = "missing-project" | "delivery";
@@ -456,7 +457,7 @@ export function SnapShotCoordinator() {
             (target) =>
               target && resolveSnapShotAttachmentTarget(questionPinsRef.current, event.id, target),
           );
-          if (animateCaptures && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          if (animateCaptures && !shouldReduceEffects()) {
             void beginSnapShotAnimationWhenReady(
               event.id,
               target,

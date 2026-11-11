@@ -41,6 +41,7 @@ import {
   showThemeInspectorHover,
   type ThemeElementInspection,
 } from "./themeInspector";
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 
 const THEME_EDITOR_SIMPLE_ROLES: ReadonlyArray<ThemeColorRole> = ["canvas", "accent"];
 
@@ -507,7 +508,7 @@ export function ThemeEditorPanel({
 
     requestAnimationFrame(() => {
       panelRef.current?.querySelector(`[data-theme-color-role="${visibleRole}"]`)?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        behavior: shouldReduceEffects() ? "auto" : "smooth",
         block: "nearest",
       });
     });

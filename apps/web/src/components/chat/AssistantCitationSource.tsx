@@ -7,6 +7,7 @@ import {
 } from "~/lib/assistantTextSelection";
 import { toastManager } from "../ui/toast";
 import { observeResize } from "~/lib/observeResize";
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 
 const CITATION_PULSE_DURATION_MS = 650;
 const CITATION_HIGHLIGHT_HOLD_MS = 1575;
@@ -114,7 +115,7 @@ function observeAssistantCitationSource({
   if (activation.dismissed) return;
   const scrollNode = list.getScrollableNode();
   if (!(scrollNode instanceof HTMLElement)) return;
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = shouldReduceEffects();
   let highlighted: Highlight | null = null;
   let ownedRange: Range | null = null;
   let selected: { range: Range; snapshot: Range } | null = null;

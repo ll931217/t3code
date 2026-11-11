@@ -11,6 +11,17 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
+      // Same decision as applyReduceEffects() in src/lib/reduceEffects.ts, made before first paint.
+      try {
+        if (
+          window.desktopBridge?.getReduceEffects?.() === true ||
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          document.documentElement.classList.add("reduce-effects");
+        }
+      } catch {}
+    </script>
+    <script>
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#000000";

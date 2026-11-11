@@ -1,5 +1,13 @@
 import { MorphIcon as BaseMorphIcon, type MorphIconProps } from "morphicons/react";
 
-export function MorphIcon({ reducedMotion = "user", ...props }: MorphIconProps) {
-  return <BaseMorphIcon reducedMotion={reducedMotion} {...props} />;
+import { useReduceEffects } from "../lib/reduceEffects";
+
+export function MorphIcon({ reducedMotion, ...props }: MorphIconProps) {
+  const reduceEffects = useReduceEffects();
+  return (
+    <BaseMorphIcon
+      reducedMotion={reduceEffects ? "always" : (reducedMotion ?? "user")}
+      {...props}
+    />
+  );
 }

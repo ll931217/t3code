@@ -1,4 +1,5 @@
 const PAGE_SCROLL_ANIMATION_MS = 150;
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 const PAGE_SCROLL_ACCELERATION_MS = 400;
 const PAGE_SCROLL_MAX_MULTIPLIER = 2;
 
@@ -91,7 +92,7 @@ function getDefaultEnv(): PageScrollEnv {
     cancelAnimationFrame: (handle) => window.cancelAnimationFrame(handle),
     setTimeout: (callback, delay) => window.setTimeout(callback, delay),
     clearTimeout: (handle) => window.clearTimeout(handle),
-    prefersReducedMotion: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    prefersReducedMotion: () => shouldReduceEffects(),
   };
 }
 

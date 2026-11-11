@@ -1,4 +1,5 @@
 const MOUSE_WHEEL_SCROLL_MS = 150;
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 const PRECISE_WHEEL_DELTA_RATIOS = [1, 3];
 
 interface WheelGlide {
@@ -98,7 +99,7 @@ export function forwardWheelToTimeline(event: WheelEvent, timeline: HTMLElement)
         ? timeline.clientHeight
         : 1;
   const distance = event.deltaY * pixelsPerUnit;
-  if (isPreciseWheel(event) || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  if (isPreciseWheel(event) || shouldReduceEffects()) {
     stopGlide(timeline);
     timeline.scrollBy({ top: distance });
     return;

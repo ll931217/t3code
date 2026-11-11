@@ -19,6 +19,7 @@ import {
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { isMonospaceFamily } from "../../appearanceFonts";
 import { observeResize } from "../../lib/observeResize";
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 
 const DEFAULT_TERMINAL_FONT_SIZE = 12;
 const MIN_TERMINAL_FONT_SIZE = 6;
@@ -2117,7 +2118,7 @@ export class GhosttyTerminalSurface {
       focused: this.focused,
       cursorBlinking: snapshot.cursorBlinking,
       cursorVisible: snapshot.cursorVisible,
-      reducedMotion: this.reducedMotionMedia?.matches ?? false,
+      reducedMotion: shouldReduceEffects(),
     });
   }
 

@@ -36,6 +36,7 @@ import {
   type SettingInheritanceState,
   type SettingOverridingProject,
 } from "./SettingInheritance";
+import { shouldReduceEffects } from "../../lib/reduceEffects";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
 const EMPTY_MANAGED_PATHS: readonly string[] = [];
@@ -78,7 +79,7 @@ let pendingTargetScroll: AbortController | undefined;
 
 function scrollAndFocusSettingsTarget(target: HTMLElement, highlight = true): void {
   pendingTargetScroll?.abort();
-  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const prefersReducedMotion = shouldReduceEffects();
   const markedScrollTarget =
     typeof target.querySelector === "function"
       ? target.querySelector<HTMLElement>(":scope > [data-settings-scroll-target]")
