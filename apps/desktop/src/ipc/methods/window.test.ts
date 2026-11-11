@@ -24,6 +24,7 @@ import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfig
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
+import * as DesktopConfig from "../../app/DesktopConfig.ts";
 import * as DesktopManagedPolicy from "../../app/DesktopManagedPolicy.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
@@ -31,6 +32,7 @@ import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import {
   getLocalEnvironmentBootstraps,
+  getReduceEffects,
   installRelayTelemetryEnabled,
   pickProjectFavicon,
   probeRemoteEditors,
@@ -182,6 +184,23 @@ describe("getLocalEnvironmentBootstraps", () => {
       assert.deepEqual(result, []);
     }).pipe(Effect.provide(bootstrapsLayer([stoppedInstance])));
   });
+});
+
+describe("getReduceEffects", () => {
+  it.effect("reports T3CODE_REDUCE_EFFECTS and parses T3CODE_DISABLE_GPU alongside it", () =>
+    Effect.gen(function* () {
+      const reduced = (env: Record<string, string>) =>
+        getReduceEffects.handler().pipe(Effect.provide(DesktopConfig.layerTest(env)));
+      assert.isTrue(yield* reduced({ T3CODE_REDUCE_EFFECTS: "1" }));
+      assert.isFalse(yield* reduced({}));
+      assert.isFalse(yield* reduced({ T3CODE_REDUCE_EFFECTS: "0" }));
+
+      const config = (env: Record<string, string>) =>
+        DesktopConfig.DesktopConfig.pipe(Effect.provide(DesktopConfig.layerTest(env)));
+      assert.isTrue((yield* config({ T3CODE_DISABLE_GPU: "true" })).disableGpu);
+      assert.isFalse((yield* config({})).disableGpu);
+    }),
+  );
 });
 
 describe("installRelayTelemetryEnabled", () => {
