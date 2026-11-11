@@ -12,6 +12,7 @@ import * as Electron from "electron";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
+import * as DesktopConfig from "./DesktopConfig.ts";
 import { trimmedString } from "./DesktopConfig.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
 import { renderUrlHandlerDesktopEntry } from "./DesktopLinuxUrlHandler.ts";
@@ -63,7 +64,10 @@ export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const homeDirectory = yield* HostProcess.HomeDirectory;
   const linuxDesktopEntryConfig = yield* LinuxDesktopEntryConfig;
+  const { disableGpu } = yield* DesktopConfig.DesktopConfig;
   return yield* Effect.sync((): DesktopPreReadyElectronOptions["Service"] => {
+    // Software rendering can use less CPU than a GPU process that falls back to llvmpipe; opt-in so it can be compared.
+    if (disableGpu) Electron.app.disableHardwareAcceleration();
     const linuxPasswordStoreCommandLine =
       platform === "linux"
         ? readCommandLineSwitchValue(Electron.app.commandLine, "password-store")
