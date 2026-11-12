@@ -2,9 +2,10 @@ import { useRef, useState } from "react";
 import { Pressable, ScrollView, View, type ScrollViewInstance } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { withUniwind } from "uniwind";
-import type {
-  AgentExecutionGraph,
-  AgentGraphNode,
+import {
+  hideDoneAgents,
+  type AgentExecutionGraph,
+  type AgentGraphNode,
 } from "@t3tools/client-runtime/state/agent-execution-graph";
 import type { AgentCommunication, AgentExecutionRecord } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -13,7 +14,6 @@ import { Button } from "../../components/ui/Button";
 import { AgentTrafficPulse } from "./AgentTrafficPulse";
 
 const ThemedSvg = withUniwind(Svg);
-const finished = new Set(["completed", "failed", "cancelled", "interrupted", "idle"]);
 
 export function AgentExecutionTree(props: {
   graph: AgentExecutionGraph;
@@ -33,16 +33,18 @@ export function AgentExecutionTree(props: {
       ),
   );
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  const [showFinished, setShowFinished] = useState(false);
+  const graph = showFinished ? props.graph : hideDoneAgents(props.graph);
   const collapsedKeys = new Set(collapsed);
-  const parents = new Set(props.graph.edges.map((edge) => edge.source));
+  const parents = new Set(graph.edges.map((edge) => edge.source));
   const [width, setWidth] = useState(360);
   const horizontal = useRef<ScrollViewInstance>(null);
   const vertical = useRef<ScrollViewInstance>(null);
   const hidden = new Set<string>();
-  for (const node of props.graph.nodes)
+  for (const node of graph.nodes)
     if (node.parentKey && (hidden.has(node.parentKey) || collapsedKeys.has(node.parentKey)))
       hidden.add(node.key);
-  const nodes = props.graph.nodes.filter((node) => !hidden.has(node.key));
+  const nodes = graph.nodes.filter((node) => !hidden.has(node.key));
   const levels = new Map<number, AgentGraphNode[]>();
   for (const node of nodes) {
     const level = levels.get(node.depth) ?? [];
@@ -99,16 +101,8 @@ export function AgentExecutionTree(props: {
         <Button size="compact" label="Selected" onPress={focus} />
         <Button
           size="compact"
-          label="Collapse finished"
-          onPress={() =>
-            setCollapsed(
-              props.graph.nodes
-                .filter(
-                  (node) => node.key !== props.graph.rootKey && finished.has(node.status ?? ""),
-                )
-                .map((node) => node.key),
-            )
-          }
+          label={showFinished ? "Hide finished" : "Show finished"}
+          onPress={() => setShowFinished(!showFinished)}
         />
       </View>
       <ScrollView ref={vertical} nestedScrollEnabled style={{ height: 320 }}>
@@ -123,10 +117,10 @@ export function AgentExecutionTree(props: {
               )
               .slice(-16)
               .map((entry) => {
-                const source = props.graph.nodes.find(
+                const source = graph.nodes.find(
                   (node) => node.ref && scopedThreadKey(node.ref) === scopedThreadKey(entry.source),
                 );
-                const target = props.graph.nodes.find(
+                const target = graph.nodes.find(
                   (node) => node.ref && scopedThreadKey(node.ref) === scopedThreadKey(entry.target),
                 );
                 const from = source ? positions.get(source.key) : null;
@@ -148,7 +142,7 @@ export function AgentExecutionTree(props: {
               style={{ position: "absolute" }}
               accessible={false}
             >
-              {props.graph.edges.map((edge) => {
+              {graph.edges.map((edge) => {
                 const from = positions.get(edge.source);
                 const to = positions.get(edge.target);
                 return from && to ? (

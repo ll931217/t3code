@@ -9,6 +9,7 @@ import type {
 } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
+  hideDoneAgents,
   type AgentExecutionGraph,
   type AgentGraphNode,
 } from "@t3tools/client-runtime/state/agent-execution-graph";
@@ -27,7 +28,6 @@ import { AgentTrafficEdges } from "./AgentTrafficEdges";
 import { AgentVerificationEditor } from "./AgentVerificationEditor";
 import { AgentExecutionNode } from "./AgentExecutionNode";
 
-const FINISHED = new Set(["completed", "failed", "cancelled", "interrupted", "idle"]);
 const NODE_WIDTH = 208;
 const NODE_HEIGHT = 88;
 
@@ -351,7 +351,7 @@ export function AgentsPanel(props: {
   const view = gestureView ?? storedView;
   const saveView = (patch: Partial<AgentGraphView>) =>
     useRightPanelStore.getState().setAgentsView(props.threadRef, { ...view, ...patch });
-  const graph = props.graph;
+  const graph = view.showFinished ? props.graph : hideDoneAgents(props.graph);
   const selected = graph.nodes.find((node) => node.key === view.selectedKey) ?? graph.nodes[0]!;
   const hidden = new Set<string>();
   const collapsed = new Set(view.collapsedKeys);
@@ -523,16 +523,11 @@ export function AgentsPanel(props: {
         </Button>
         <Button
           size="xs"
-          variant="ghost"
-          onClick={() =>
-            saveView({
-              collapsedKeys: graph.nodes
-                .filter((node) => node.key !== graph.rootKey && FINISHED.has(node.status ?? ""))
-                .map((node) => node.key),
-            })
-          }
+          variant={view.showFinished ? "secondary" : "ghost"}
+          aria-pressed={view.showFinished === true}
+          onClick={() => saveView({ showFinished: !view.showFinished })}
         >
-          Collapse finished
+          Show finished
         </Button>
       </div>
       <div

@@ -170,3 +170,21 @@ export function deriveAgentExecutionGraph(input: {
   }
   return { rootKey, nodes: visible, edges };
 }
+
+const DONE_AGENT_STATUSES = new Set(["completed", "cancelled"]);
+
+// Failed and interrupted agents stay so their outcome stays visible.
+export function hideDoneAgents(graph: AgentExecutionGraph): AgentExecutionGraph {
+  const kept = new Set<string>([graph.rootKey]);
+  for (const node of [...graph.nodes].reverse()) {
+    if (kept.has(node.key) || !DONE_AGENT_STATUSES.has(node.status ?? "")) {
+      kept.add(node.key);
+      if (node.parentKey) kept.add(node.parentKey);
+    }
+  }
+  return {
+    rootKey: graph.rootKey,
+    nodes: graph.nodes.filter((node) => kept.has(node.key)),
+    edges: graph.edges.filter((edge) => kept.has(edge.target)),
+  };
+}

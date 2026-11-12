@@ -33,7 +33,7 @@ export function AgentExecutionNode({
         <span className="truncate">{title}</span>
       </span>
       {objective ? (
-        <span className="w-full whitespace-pre-wrap wrap-anywhere text-xs text-muted-foreground">
+        <span className="line-clamp-2 w-full wrap-anywhere text-xs text-muted-foreground">
           {objective}
         </span>
       ) : null}

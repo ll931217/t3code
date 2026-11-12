@@ -43,6 +43,7 @@ export interface AgentGraphView {
   selectedKey: string | null;
   collapsedKeys: string[];
   follow: boolean;
+  showFinished?: boolean;
 }
 
 export const DEFAULT_AGENT_GRAPH_VIEW: AgentGraphView = {

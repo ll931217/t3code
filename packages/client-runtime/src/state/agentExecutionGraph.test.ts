@@ -9,13 +9,38 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
-import { deriveAgentExecutionGraph } from "./agentExecutionGraph.ts";
+import { deriveAgentExecutionGraph, hideDoneAgents } from "./agentExecutionGraph.ts";
 
 const local = EnvironmentId.make("local");
 const remote = EnvironmentId.make("remote");
 const root = { environmentId: local, threadId: ThreadId.make("root") };
 
 describe("agent execution graph", () => {
+  it("hides done agents unless an unfinished descendant still runs beneath them", () => {
+    const ref = (threadId: string) => ({ ...root, threadId: ThreadId.make(threadId) });
+    const graph = hideDoneAgents(
+      deriveAgentExecutionGraph({
+        root,
+        threads: [
+          { ref: root, title: "Root", status: "completed" },
+          { ref: ref("done-parent"), parent: root, title: "Done parent", status: "completed" },
+          { ref: ref("live"), parent: ref("done-parent"), title: "Live", status: "running" },
+          { ref: ref("done"), parent: root, title: "Done", status: "completed" },
+          { ref: ref("stopped"), parent: root, title: "Stopped", status: "cancelled" },
+          { ref: ref("failed"), parent: root, title: "Failed", status: "failed" },
+        ],
+        projections: [],
+      }),
+    );
+    expect(graph.nodes.map((node) => node.title)).toEqual([
+      "Root",
+      "Done parent",
+      "Failed",
+      "Live",
+    ]);
+    expect(graph.edges).toHaveLength(3);
+  });
+
   it("keeps remote thread identities distinct and excludes unrelated conversations", () => {
     const graph = deriveAgentExecutionGraph({
       root,
