@@ -24,6 +24,16 @@ window.addEventListener("vite:preloadError", (event) => {
   }
 });
 
+// Feeds the any-hover variant in index.css when the browser misreports a real mouse.
+if (!window.matchMedia("(any-hover: hover)").matches) {
+  const markMouseSeen = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    document.documentElement.dataset.mouseSeen = "";
+    window.removeEventListener("pointermove", markMouseSeen);
+  };
+  window.addEventListener("pointermove", markMouseSeen, { passive: true });
+}
+
 const app = <AppRoot router={router} />;
 
 // Split by runtime to keep Clerk out of local startup and clerk-js out of browser builds.
