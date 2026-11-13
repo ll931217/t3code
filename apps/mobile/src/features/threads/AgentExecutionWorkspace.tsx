@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { ScrollView, View } from "react-native";
-import { CommandId, type ScopedThreadRef } from "@t3tools/contracts";
+import { CommandId, type AgentCommunication, type ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveAgentExecutionGraph } from "@t3tools/client-runtime/state/agent-execution-graph";
 import * as Cause from "effect/Cause";
@@ -16,6 +16,12 @@ import { AgentExecutionTree } from "./AgentExecutionTree";
 import { AgentExecutionDetails } from "./AgentExecutionDetails";
 import { AgentProfilesPanel } from "./AgentProfilesPanel";
 import { Button } from "../../components/ui/Button";
+
+const COMMUNICATION_LABELS: Record<AgentCommunication["kind"], string> = {
+  dispatch: "Task",
+  message: "Message",
+  result: "Result",
+};
 
 export function AgentExecutionWorkspace(props: {
   threadRef: ScopedThreadRef;
@@ -64,6 +70,18 @@ export function AgentExecutionWorkspace(props: {
   );
   const [selectedKey, setSelectedKey] = useState(graph.rootKey);
   const selected = graph.nodes.find((node) => node.key === selectedKey) ?? graph.nodes[0]!;
+  const selectedRefKey = selected.ref ? scopedThreadKey(selected.ref) : null;
+  const selectedCommunications = data.communications.filter(
+    (entry) =>
+      scopedThreadKey(entry.source) === selectedRefKey ||
+      scopedThreadKey(entry.target) === selectedRefKey,
+  );
+  const titles = new Map(
+    graph.nodes.flatMap((node) =>
+      node.ref ? [[scopedThreadKey(node.ref), node.title] as const] : [],
+    ),
+  );
+  const titleOf = (ref: ScopedThreadRef) => titles.get(scopedThreadKey(ref)) ?? "Unknown agent";
   const update = useAtomCommand(agentExecutionEnvironment.update, { reportFailure: false });
   const stop = useAtomCommand(agentExecutionEnvironment.stop, { reportFailure: false });
   return (
@@ -141,24 +159,25 @@ export function AgentExecutionWorkspace(props: {
               : undefined
           }
         />
-        <View className="gap-2">
-          <Text className="font-t3-bold text-foreground">Communication</Text>
-          {data.communications
-            .filter(
-              (entry) =>
-                selected.ref &&
-                (scopedThreadKey(entry.source) === scopedThreadKey(selected.ref) ||
-                  scopedThreadKey(entry.target) === scopedThreadKey(selected.ref)),
-            )
-            .map((entry) => (
-              <Text
+        {selectedCommunications.length ? (
+          <View className="gap-3">
+            <Text className="font-t3-bold text-foreground">Communication</Text>
+            {selectedCommunications.map((entry) => (
+              <View
                 key={JSON.stringify([entry.source.environmentId, entry.id])}
-                className="text-xs text-foreground-secondary"
+                className="gap-0.5"
               >
-                {entry.kind} · {entry.status}: {entry.summary}
-              </Text>
+                <Text className="text-xs text-foreground-muted">
+                  {COMMUNICATION_LABELS[entry.kind]} · {titleOf(entry.source)} →{" "}
+                  {titleOf(entry.target)} · {entry.status}
+                </Text>
+                <Text selectable numberOfLines={3} className="text-xs text-foreground-secondary">
+                  {entry.summary}
+                </Text>
+              </View>
             ))}
-        </View>
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );

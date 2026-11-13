@@ -7,6 +7,8 @@ import { Button } from "../../components/ui/Button";
 import { uuidv4 } from "../../lib/uuid";
 import { agentProfileEnvironment } from "../../state/agentExecution";
 import { useEnvironmentQuery } from "../../state/query";
+import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
+import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 
 function ProfileDetails({ threadRef }: { threadRef: ScopedThreadRef }) {
   const result = useEnvironmentQuery(
@@ -50,6 +52,8 @@ export function AgentExecutionDetails(props: {
   const [evidence, setEvidence] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const markdownStyles = useMarkdownPreviewStyles();
+  const objective = (props.record?.objective || props.node.objective || "").trim();
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -207,9 +211,14 @@ export function AgentExecutionDetails(props: {
       ) : (
         <>
           <Text className="font-t3-bold text-foreground">Objective</Text>
-          <Text selectable className="text-sm text-foreground-secondary">
-            {props.record?.objective || props.node.objective || "No objective recorded."}
-          </Text>
+          {objective ? (
+            <SelectableMarkdownText
+              markdown={objective}
+              textStyle={markdownStyles.nativeTextStyle}
+            />
+          ) : (
+            <Text className="text-sm text-foreground-muted">No objective recorded.</Text>
+          )}
           {props.onUpdate && props.node.ref ? (
             <Button
               label="Edit objective and checklists"
@@ -240,31 +249,29 @@ export function AgentExecutionDetails(props: {
           ) : (
             <Text className="text-sm text-foreground-muted">No tasks recorded.</Text>
           )}
-          <Text className="font-t3-bold text-foreground">Verification</Text>
           {props.record?.verifications.length ? (
-            props.record.verifications.map((check) => (
-              <View key={check.id} className="gap-1">
-                <Text className="text-sm text-foreground">
-                  {check.status === "passed" ? "☑" : "☐"} {check.title}
+            <Text className="font-t3-bold text-foreground">Verification</Text>
+          ) : null}
+          {props.record?.verifications.map((check) => (
+            <View key={check.id} className="gap-1">
+              <Text className="text-sm text-foreground">
+                {check.status === "passed" ? "☑" : "☐"} {check.title}
+              </Text>
+              <Text className="text-xs text-foreground-muted">
+                {check.status} · {check.provenance} · {check.freshness} evidence
+              </Text>
+              {check.evidence.map((item) => (
+                <Text
+                  selectable
+                  key={JSON.stringify(item)}
+                  className="text-xs text-foreground-secondary"
+                >
+                  {item.kind}: {item.summary}
+                  {item.reference ? ` (${item.reference})` : ""}
                 </Text>
-                <Text className="text-xs text-foreground-muted">
-                  {check.status} · {check.provenance} · {check.freshness} evidence
-                </Text>
-                {check.evidence.map((item) => (
-                  <Text
-                    selectable
-                    key={JSON.stringify(item)}
-                    className="text-xs text-foreground-secondary"
-                  >
-                    {item.kind}: {item.summary}
-                    {item.reference ? ` (${item.reference})` : ""}
-                  </Text>
-                ))}
-              </View>
-            ))
-          ) : (
-            <Text className="text-sm text-foreground-muted">No verification recorded.</Text>
-          )}
+              ))}
+            </View>
+          ))}
         </>
       )}
       {props.node.progress ? (
