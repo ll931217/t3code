@@ -1,6 +1,12 @@
 import * as Digest from "effect/crypto/Digest";
 import * as Hex from "effect/encoding/Hex";
-import { CommandId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
+import {
+  CommandId,
+  type AgentExecutionTask,
+  type OrchestrationV2PlanStep,
+  type OrchestrationV2StoredEvent,
+  type ThreadId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,11 +18,24 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as AgentExecutionStore from "./AgentExecutionStore.ts";
 
+// Tasks keep following the agent's todo list until a user or agent writes tasks of their own.
+const TODO_TASK_PREFIX = "todo:";
+const TODO_STATUS = {
+  pending: "pending",
+  running: "in-progress",
+  completed: "done",
+} as const satisfies Record<OrchestrationV2PlanStep["status"], AgentExecutionTask["status"]>;
+const EXCERPT_CHARS = 240;
+
+function excerpt(text: string | null, fallback: string): string {
+  const flat = (text ?? "").replace(/\s+/g, " ").trim();
+  if (flat === "") return fallback;
+  return flat.length > EXCERPT_CHARS ? `${flat.slice(0, EXCERPT_CHARS - 1).trimEnd()}…` : flat;
+}
+
 const make = Effect.gen(function* () {
   const digest = yield* Digest.Digest;
-  const communicationId = Effect.fn("AgentExecutionObserver.communicationId")(function* (
-    id: string,
-  ) {
+  const boundedId = Effect.fn("AgentExecutionObserver.boundedId")(function* (id: string) {
     if (id.length <= 128) return id;
     return Hex.encode(yield* digest.digest(Digest.sha256, new TextEncoder().encode(id)));
   });
@@ -25,6 +44,55 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const environmentId = yield* identity.getEnvironmentId;
+  const mirrorTodoList = Effect.fn("AgentExecutionObserver.mirrorTodoList")(
+    function* (
+      threadId: ThreadId,
+      steps: ReadonlyArray<OrchestrationV2PlanStep>,
+      sequence: number,
+    ) {
+      const current = yield* records.get(threadId);
+      if (current === null || !current.tasks.every((task) => task.id.startsWith(TODO_TASK_PREFIX)))
+        return;
+      const tasks = new Map<string, AgentExecutionTask>();
+      for (const step of steps.slice(0, 200)) {
+        const id = yield* boundedId(`${TODO_TASK_PREFIX}${step.id}`);
+        tasks.set(id, {
+          id,
+          title: step.text.slice(0, 500).trim(),
+          status: TODO_STATUS[step.status],
+        });
+      }
+      const next = [...tasks.values()];
+      if (
+        next.length === current.tasks.length &&
+        next.every((task, index) => {
+          const previous = current.tasks[index];
+          return (
+            previous?.id === task.id &&
+            previous.title === task.title &&
+            previous.status === task.status
+          );
+        })
+      )
+        return;
+      yield* records.update(
+        {
+          threadId,
+          commandId: CommandId.make(`execution-todo:${sequence}`),
+          expectedRevision: current.revision,
+          objective: current.objective,
+          tasks: next,
+          verifications: current.verifications.map(
+            ({ provenance: _provenance, freshness: _freshness, ...item }) => item,
+          ),
+        },
+        "server",
+      );
+    },
+    Effect.catch((error) =>
+      Effect.logWarning("Agent todo list could not be mirrored into tasks", { error }),
+    ),
+  );
   const consume = Effect.fn("AgentExecutionObserver.consume")(function* ({
     event,
     sequence,
@@ -51,16 +119,22 @@ const make = Effect.gen(function* () {
       if (message.senderThreadId !== undefined) {
         yield* records.recordCommunication(
           {
-            id: yield* communicationId(`${message.id}:delivered`),
+            id: yield* boundedId(`${message.id}:delivered`),
             source: { environmentId, threadId: message.senderThreadId },
             target: { environmentId, threadId: event.threadId },
             kind: "message",
             status: "delivered",
-            summary: "Agent message delivered to the thread.",
+            summary: excerpt(message.text, "Agent message delivered to the thread."),
           },
           event.occurredAt,
         );
       }
+    } else if (
+      event.type === "plan.updated" &&
+      event.payload.kind === "todo_list" &&
+      event.payload.status !== "superseded"
+    ) {
+      yield* mirrorTodoList(event.threadId, event.payload.steps, sequence);
     } else if (event.type === "checkpoint.captured" || event.type === "run.created") {
       if ((yield* records.get(event.threadId)) !== null) {
         yield* records.updateCheckpoint({
@@ -98,19 +172,19 @@ const make = Effect.gen(function* () {
         }
         yield* records.recordCommunication(
           {
-            id: yield* communicationId(`${task.id}:dispatch`),
+            id: yield* boundedId(`${task.id}:dispatch`),
             source: parent,
             target,
             kind: "dispatch",
             status: "sent",
-            summary: "Delegated task sent.",
+            summary: excerpt(task.prompt, "Delegated task sent."),
           },
           event.occurredAt,
         );
         if (task.startedAt !== null) {
           yield* records.recordCommunication(
             {
-              id: yield* communicationId(`${task.id}:started`),
+              id: yield* boundedId(`${task.id}:started`),
               source: parent,
               target,
               kind: "dispatch",
@@ -123,12 +197,12 @@ const make = Effect.gen(function* () {
         if (task.result !== null) {
           yield* records.recordCommunication(
             {
-              id: yield* communicationId(`${task.id}:result`),
+              id: yield* boundedId(`${task.id}:result`),
               source: target,
               target: parent,
               kind: "result",
               status: "sent",
-              summary: "Worker result available.",
+              summary: excerpt(task.result, "Worker result available."),
             },
             event.occurredAt,
           );
@@ -136,7 +210,7 @@ const make = Effect.gen(function* () {
           if (delivery === "delivered" || delivery === "acknowledged") {
             yield* records.recordCommunication(
               {
-                id: yield* communicationId(`${task.id}:result:${delivery}`),
+                id: yield* boundedId(`${task.id}:result:${delivery}`),
                 source: target,
                 target: parent,
                 kind: "result",
@@ -161,6 +235,7 @@ const make = Effect.gen(function* () {
           event.type === "checkpoint.captured" ||
           event.type === "run.created" ||
           event.type === "subagent.updated" ||
+          (event.type === "plan.updated" && event.payload.kind === "todo_list") ||
           (event.type === "message.updated" && event.payload.role === "user"),
       ),
       Stream.runForEach(consume),

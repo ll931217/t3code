@@ -353,9 +353,14 @@ const make = Effect.gen(function* () {
         }>`SELECT request_json, payload_json FROM agent_communications WHERE source_environment_id = ${input.source.environmentId} AND source_thread_id = ${input.source.threadId} AND id = ${input.id}`;
         const row = rows[0];
         if (row !== undefined) {
-          if (row.request_json !== request)
+          const stored = yield* decodeCommunication(row.payload_json);
+          // Rows written before summaries carried message text must still dedupe.
+          if (
+            row.request_json !==
+            (yield* encodeCommunicationInput({ ...input, summary: stored.summary }))
+          )
             return yield* new AgentExecutionError({ reason: "command-conflict" });
-          return { communication: yield* decodeCommunication(row.payload_json), duplicate: true };
+          return { communication: stored, duplicate: true };
         }
         const communication: AgentCommunication = {
           ...input,

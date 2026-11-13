@@ -84,11 +84,13 @@ it.effect("records only observed delivery stages once and invalidates earlier ev
         },
       },
     });
-    expect((yield* store.communications(refs)).map((item) => [item.kind, item.status])).toEqual([
-      ["dispatch", "sent"],
-      ["dispatch", "delivered"],
-      ["result", "sent"],
-      ["result", "delivered"],
+    expect(
+      (yield* store.communications(refs)).map((item) => [item.kind, item.status, item.summary]),
+    ).toEqual([
+      ["dispatch", "sent", "Implement"],
+      ["dispatch", "delivered", "Worker started the delegated task."],
+      ["result", "sent", "Implemented"],
+      ["result", "delivered", "Parent received the worker result."],
     ]);
     const sql = yield* SqlClient.SqlClient;
     expect(yield* sql`SELECT sequence FROM agent_execution_observer WHERE id = 1`).toEqual([
@@ -201,7 +203,84 @@ it.effect(
         (yield* store.communications([{ environmentId, threadId }])).map((item) => [
           item.kind,
           item.status,
+          item.summary,
         ]),
-      ).toEqual([["message", "delivered"]]);
+      ).toEqual([["message", "delivered", "Review the result"]]);
     }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("mirrors the agent's todo list into tasks until someone writes their own", () =>
+  Effect.gen(function* () {
+    const store = yield* AgentExecutionStore.AgentExecutionStore;
+    const observer = yield* AgentExecutionObserver.AgentExecutionObserver;
+    const threadId = ThreadId.make("worker");
+    const now = yield* DateTime.now;
+    yield* store.update(
+      {
+        threadId,
+        commandId: CommandId.make("seed"),
+        expectedRevision: 0,
+        objective: "Fix it",
+        tasks: [],
+        verifications: [],
+      },
+      "server",
+    );
+    const todo = (
+      sequence: number,
+      steps: ReadonlyArray<{
+        id: string;
+        text: string;
+        status: "pending" | "running" | "completed";
+      }>,
+    ) =>
+      decodeStoredEvent({
+        sequence,
+        commandId: null,
+        event: {
+          id: `plan-event-${sequence}`,
+          type: "plan.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: "plan",
+            threadId,
+            runId: null,
+            nodeId: "root",
+            status: "active",
+            kind: "todo_list",
+            steps,
+          },
+        },
+      });
+    yield* observer.consume(
+      yield* todo(1, [
+        { id: "a", text: "Read the code", status: "completed" },
+        { id: "b", text: "Write the fix", status: "running" },
+        { id: "c", text: "Run tests", status: "pending" },
+      ]),
+    );
+    expect((yield* store.get(threadId))?.tasks.map((task) => [task.title, task.status])).toEqual([
+      ["Read the code", "done"],
+      ["Write the fix", "in-progress"],
+      ["Run tests", "pending"],
+    ]);
+    expect(yield* store.pendingSteering()).toEqual([]);
+    const current = (yield* store.get(threadId))!;
+    yield* store.update(
+      {
+        threadId,
+        commandId: CommandId.make("own-tasks"),
+        expectedRevision: current.revision,
+        objective: current.objective,
+        tasks: [{ id: "mine", title: "My own task", status: "pending" }],
+        verifications: [],
+      },
+      "agent",
+    );
+    yield* observer.consume(
+      yield* todo(2, [{ id: "a", text: "Read the code", status: "completed" }]),
+    );
+    expect((yield* store.get(threadId))?.tasks.map((task) => task.title)).toEqual(["My own task"]);
+  }).pipe(Effect.provide(testLayer)),
 );

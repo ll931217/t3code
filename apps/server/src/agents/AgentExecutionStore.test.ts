@@ -196,6 +196,10 @@ it.layer(AgentExecutionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.lay
         };
         const first = yield* store.recordCommunication(input);
         assert.deepStrictEqual(yield* store.recordCommunication(input), first);
+        assert.deepStrictEqual(
+          yield* store.recordCommunication({ ...input, summary: "Reworded summary" }),
+          first,
+        );
         const otherSource = { ...source, environmentId: EnvironmentId.make("unrelated-env") };
         yield* store.recordCommunication({ ...input, source: otherSource, target: otherSource });
         const records = yield* store.communications([source]);
