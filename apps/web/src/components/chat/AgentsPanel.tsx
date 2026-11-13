@@ -21,6 +21,8 @@ import {
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { observeResize } from "../../lib/observeResize";
 import { randomUUID } from "../../lib/utils";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -30,6 +32,72 @@ import { AgentExecutionNode } from "./AgentExecutionNode";
 
 const NODE_WIDTH = 208;
 const NODE_HEIGHT = 88;
+const LONG_OBJECTIVE_CHARS = 600;
+
+function AgentObjective(props: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = props.text.trim();
+  const long = text.length > LONG_OBJECTIVE_CHARS || text.split("\n").length > 12;
+  return (
+    <div>
+      <h3 className="mb-1 font-medium">Objective</h3>
+      {text ? (
+        <>
+          <div className={long && !expanded ? "max-h-64 overflow-hidden mask-b-from-70%" : ""}>
+            <ChatMarkdown text={text} cwd={undefined} />
+          </div>
+          {long ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="mt-1"
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? "Show less" : "Show more"}
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <p className="text-muted-foreground">No objective recorded yet.</p>
+      )}
+    </div>
+  );
+}
+
+const COMMUNICATION_LABELS: Record<AgentCommunication["kind"], string> = {
+  dispatch: "Task",
+  message: "Message",
+  result: "Result",
+};
+
+function AgentCommunicationList(props: {
+  entries: ReadonlyArray<AgentCommunication>;
+  titles: ReadonlyMap<string, string>;
+}) {
+  const name = (ref: ScopedThreadRef) => props.titles.get(scopedThreadKey(ref)) ?? "Unknown agent";
+  return (
+    <section className="space-y-2 border-t border-border p-4 text-xs">
+      <h3 className="font-medium">Communication</h3>
+      <ol className="space-y-3">
+        {props.entries.map((entry) => (
+          <li key={entry.id} className="space-y-0.5">
+            <p className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {COMMUNICATION_LABELS[entry.kind]}
+              </span>
+              <span>
+                {name(entry.source)} → {name(entry.target)}
+              </span>
+              <span>· {entry.status}</span>
+              <time dateTime={entry.occurredAt}>· {formatRelativeTimeLabel(entry.occurredAt)}</time>
+            </p>
+            <p className="line-clamp-3 wrap-anywhere">{entry.summary}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 function AgentDetails(props: {
   node: AgentGraphNode;
@@ -182,12 +250,7 @@ function AgentDetails(props: {
         </form>
       ) : (
         <>
-          <div>
-            <h3 className="mb-1 font-medium">Objective</h3>
-            <p className="whitespace-pre-wrap wrap-anywhere text-muted-foreground">
-              {record?.objective || props.node.objective || "No objective recorded yet."}
-            </p>
-          </div>
+          <AgentObjective text={record?.objective || props.node.objective || ""} />
           {props.onUpdate && props.node.ref ? (
             <Button
               size="xs"
@@ -230,9 +293,9 @@ function AgentDetails(props: {
               <p className="text-xs text-muted-foreground">No tasks recorded yet.</p>
             )}
           </div>
-          <div>
-            <h3 className="mb-2 font-medium">Verification</h3>
-            {record?.verifications.length ? (
+          {record?.verifications.length ? (
+            <div>
+              <h3 className="mb-2 font-medium">Verification</h3>
               <ul className="space-y-3">
                 {record.verifications.map((check) => (
                   <li key={check.id}>
@@ -266,10 +329,8 @@ function AgentDetails(props: {
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="text-xs text-muted-foreground">No verification recorded yet.</p>
-            )}
-          </div>
+            </div>
+          ) : null}
         </>
       )}
       {props.node.progress ? (
@@ -481,6 +542,17 @@ export function AgentsPanel(props: {
   const record = selected.ref
     ? props.executionRecords?.get(scopedThreadKey(selected.ref))
     : undefined;
+  const selectedKey = selected.ref ? scopedThreadKey(selected.ref) : null;
+  const selectedCommunications = (props.communications ?? []).filter(
+    (entry) =>
+      scopedThreadKey(entry.source) === selectedKey ||
+      scopedThreadKey(entry.target) === selectedKey,
+  );
+  const titles = new Map(
+    props.graph.nodes.flatMap((node) =>
+      node.ref ? [[scopedThreadKey(node.ref), node.title] as const] : [],
+    ),
+  );
   return (
     <div
       ref={container}
@@ -717,22 +789,8 @@ export function AgentsPanel(props: {
               : undefined
           }
         />
-        {props.communications?.length ? (
-          <section className="space-y-2 border-t border-border p-4 text-xs">
-            <h3 className="font-medium">Communication</h3>
-            {props.communications
-              .filter(
-                (entry) =>
-                  selected.ref &&
-                  (scopedThreadKey(entry.source) === scopedThreadKey(selected.ref) ||
-                    scopedThreadKey(entry.target) === scopedThreadKey(selected.ref)),
-              )
-              .map((entry) => (
-                <p key={entry.id}>
-                  {entry.kind} · {entry.status}: {entry.summary}
-                </p>
-              ))}
-          </section>
+        {selectedCommunications.length ? (
+          <AgentCommunicationList entries={selectedCommunications} titles={titles} />
         ) : null}
       </div>
     </div>
