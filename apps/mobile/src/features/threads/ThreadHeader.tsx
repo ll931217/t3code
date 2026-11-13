@@ -2,7 +2,10 @@ import { AppBar } from "../../components/ui/AppBar";
 import { useNavigation } from "@react-navigation/native";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
-import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import {
+  useAdaptiveWorkspaceLayout,
+  useWorkspacePaneState,
+} from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-navigation";
 import { useWorkspaceBackNavigation } from "../layout/workspace/useAndroidWorkspaceNavigation";
 import {
@@ -23,9 +26,9 @@ export function ThreadHeader(props: {
 }) {
   const navigation = useNavigation();
   const { selectedThreadDetailRef } = useThreadSelection();
-  const goBack = useWorkspaceBackNavigation("threads");
-  const { panes, toggleAuxiliaryPane, composerKeyboardActive, startNewTask } =
-    useAdaptiveWorkspaceLayout();
+  const goBack = useWorkspaceBackNavigation();
+  const { toggleAuxiliaryPane, startNewTask } = useAdaptiveWorkspaceLayout();
+  const { panes } = useWorkspacePaneState();
   const gitMenu = useThreadGitMenuDefinition(props.gitControls);
   const terminalMenu = threadTerminalMenu(props.gitControls);
   const filesVisible = props.inspectorMode === "files" && panes.auxiliaryPaneVisible;
@@ -67,7 +70,6 @@ export function ThreadHeader(props: {
       actions={actions}
       menus={menus}
       hideBottomBorder
-      compact={composerKeyboardActive}
     />
   );
 }

@@ -82,6 +82,7 @@ it.effect("reapplying a previous profile updates both its snapshot and model", (
               Effect.succeedSome({
                 projectId: projection.thread.projectId,
                 title: "Project",
+                hasCustomTitle: false,
                 workspaceRoot: "/project",
                 defaultModelSelection: null,
                 defaultThreadEnvMode: null,
